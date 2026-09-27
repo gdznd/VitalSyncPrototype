@@ -1,0 +1,54 @@
+.search-results{max-height:240px;overflow:auto;margin-top:8px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--bg-panel);box-shadow:0 8px 20px rgba(19,57,74,.08)}
+.search-result{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border-radius:8px;background:transparent;border:0;cursor:pointer;font-size:13px;color:var(--ink)}
+.search-result:hover{background:#f4f8f8}
+.result-left{display:flex;flex-direction:column;align-items:flex-start}
+.result-left strong{font-size:13px;color:var(--ink)}
+.result-left small{color:#7d8c92;font-size:11px;margin-top:4px}
+.result-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.result-right .status-chip{font-size:11px;padding:4px 9px;border-radius:999px}
+.result-right .managing-doctor{font-size:11px;color:#6d8086}
+.search-empty{padding:10px 12px;color:#849299;font-size:12px}
+
+.selection-confirm{margin-top:12px;padding:14px;border-radius:10px;border:1px solid var(--line);background:white;box-shadow:0 8px 18px rgba(19,57,74,.04)}
+.selection-confirm .confirm-heading h3{margin:0;font-size:15px;color:var(--ink)}
+.selection-confirm .confirm-heading p{margin:6px 0 10px;color:#7d8c92;font-size:12px}
+.selection-confirm .confirmation-details{margin:8px 0}
+.selection-confirm .confirm-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.selection-confirm .confirm-actions button{padding:8px 12px;border-radius:8px;border:0;font-weight:700}
+.selection-confirm .confirm-actions button:first-child{background:transparent;border:1px solid var(--line);color:#57696f}
+.selection-confirm .confirm-actions .primary{background:var(--teal);color:white}
+
+
+
+.range-controls{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;padding:4px;border:1px solid var(--line);border-radius:8px;background:#f4f8f8}
+.range-controls button{padding:8px 10px;border:0;border-radius:6px;color:#6b7d84;background:transparent;font-size:10px;font-weight:700;white-space:nowrap}
+.range-controls button:hover{color:var(--teal);background:#e8f5f4}
+.range-controls button.active{color:white;background:var(--teal);box-shadow:0 2px 5px #258a8835}
+.recent-activity-summary .panel-heading{align-items:flex-start}
+.recent-activity-summary .range-controls{margin-top:0}
+.selected-doctors-summary{display:flex;align-items:center;gap:8px;margin-top:6px;color:#687b82;font-size:11px;line-height:1.4}
+.selected-doctors-summary button{padding:6px 8px;border:1px solid var(--line);border-radius:6px;color:var(--teal);background:var(--bg-panel);font-size:10px;font-weight:700;white-space:nowrap}
+.doctor-picker-modal{width:min(460px,calc(100vw - 40px))}
+.doctor-picker-modal .doctor-picker{margin-top:20px}
+.conversation-menu-wrap{position:relative;margin-left:auto}
+.conversation-menu-wrap>button{margin-left:0}
+.conversation-menu{position:absolute;z-index:5;top:calc(100% + 8px);right:0;min-width:170px;padding:5px;border:1px solid var(--line);border-radius:8px;background:var(--bg-panel);box-shadow:0 10px 25px #1e364722}
+.conversation-menu button{width:100%;padding:8px 10px;border:0;border-radius:5px;color:#5f737b;background:transparent;text-align:left;font-size:11px;font-weight:600}
+.conversation-menu button:hover{color:var(--teal);background:#eff9f8}
+.conversation-menu .menu-choice.active{color:var(--teal);background:#eff9f8}
+.conversation-search{padding:5px 4px 7px;border-bottom:1px solid var(--line)}
+.conversation-search input{width:100%;padding:8px 9px;border:1px solid var(--line);border-radius:6px;color:var(--text-ink);background:var(--bg-app);font:inherit;font-size:10px;outline-color:var(--teal)}
+.conversation-search-results{max-height:130px;overflow:auto;margin-top:5px}
+.conversation-search-results p{margin:0;padding:6px 4px;color:#5f737b;font-size:10px;line-height:1.4}
+.conversation-search-results p strong{display:block;margin-bottom:2px;color:var(--teal);font-size:9px}
+.conversation-search-results span{display:block;padding:6px 4px;color:#87979d;font-size:10px}
+.notification-choice{display:grid;gap:5px;padding:8px 10px;color:#60737b;font-size:10px;font-weight:600}
+.notification-choice select{width:100%;padding:6px 7px;border:1px solid var(--line);border-radius:6px;color:#526870;background:var(--bg-panel);font:inherit;font-size:10px;outline-color:var(--teal)}
+.settings-field input{width:180px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;color:var(--text-ink);background:var(--bg-panel);font:inherit;font-size:12px}
+.goals-page{max-width:1000px;margin:0 auto}.goals-section-heading{display:flex;align-items:center;gap:10px;margin:8px 0 14px}.goals-section-heading h2{font-family:Manrope;font-size:16px}.goals-section-heading span{padding:4px 8px;border-radius:999px;color:var(--teal);background:#e8f5f4;font-size:10px;font-weight:800}.goals-empty{min-height:420px;display:grid;place-items:center;align-content:center;gap:10px;padding:30px;border:1px dashed var(--line);border-radius:12px;background:var(--bg-panel);text-align:center}.goals-empty .select-icon{margin:0}.goals-empty h2{font-family:Manrope;font-size:18px}.goals-empty p{max-width:330px;margin:0;color:#849299;font-size:12px;line-height:1.5}.doctor-goals-list{display:grid;gap:10px}.doctor-goal-card{position:relative;display:flex;justify-content:space-between;gap:16px;padding:18px 20px;border:1px solid var(--line);border-radius:10px;background:var(--bg-panel);box-shadow:0 3px 7px #13394a05}.doctor-goal-main{display:flex;gap:13px;min-width:0}.goal-symbol{width:36px;height:36px;flex:0 0 36px;display:grid;place-items:center;border-radius:10px;color:var(--teal);background:#e8f5f4}.doctor-goal-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.doctor-goal-title h3{margin:0;color:var(--ink);font-family:Manrope;font-size:14px}.goal-status{padding:4px 7px;border-radius:999px;font-size:9px;font-weight:800}.goal-status.active{color:#39816d;background:#e9f7f1}.goal-status.paused{color:#a87839;background:#fff4df}.goal-status.completed{color:#4184a9;background:#eaf5fb}.goal-status.cancelled{color:#b75e5b;background:#fff0ef}.goal-category{margin:4px 0 10px;color:var(--teal);font-size:10px;font-weight:800}.goal-target,.goal-dates,.goal-instructions{margin:4px 0;color:#71818b;font-size:11px}.goal-target strong,.goal-dates strong{color:#526870}.goal-instructions{padding-top:8px;border-top:1px solid var(--line);font-style:italic}.goal-actions-menu{position:relative}.goal-actions-menu>button{width:30px;height:30px;border:1px solid var(--line);border-radius:7px;color:#71818b;background:var(--bg-panel);letter-spacing:1px}.goal-action-popover{position:absolute;z-index:4;top:36px;right:0;min-width:145px;padding:5px;border:1px solid var(--line);border-radius:8px;background:var(--bg-panel);box-shadow:0 10px 25px #1e364722}.goal-action-popover button{width:100%;padding:8px 10px;border:0;border-radius:5px;color:#60737b;background:transparent;text-align:left;font-size:11px;font-weight:700}.goal-action-popover button:hover{color:var(--teal);background:#eff9f8}.doctor-template-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:20px}.doctor-template-card{display:grid;grid-template-columns:1fr auto;gap:3px;padding:12px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--bg-panel);text-align:left}.doctor-template-card:hover{border-color:var(--teal);background:#eff9f8}.doctor-template-card strong{font-size:12px}.doctor-template-card small{color:#7d8c92;font-size:10px}.doctor-template-card span{grid-column:2;grid-row:1 / 3;align-self:center;color:var(--teal);font-size:20px}.goal-config-modal{width:min(630px,calc(100vw - 40px))}.full-width{grid-column:1 / -1}@media (max-width:700px){.doctor-goal-card{align-items:flex-start;padding:15px}.doctor-goal-main{gap:9px}.goal-target,.goal-dates{line-height:1.5}}
+.patient-control{min-height:36px;padding:8px 11px;border:1px solid #d6e3e5;border-radius:8px;outline:none;color:#294650;background:var(--bg-panel);font:inherit;font-size:11px;font-weight:700;box-shadow:0 1px 2px #1631440a;transition:border-color .15s,box-shadow .15s,background .15s}
+.patient-control:hover{border-color:#a8c9ca;background:#fbfefe}
+.patient-control:focus{border-color:var(--teal);box-shadow:0 0 0 3px #258a8822}
+.patient-visibility-control{min-width:150px;padding-right:28px;cursor:pointer}
+.patient-follow-up-control{min-width:148px;color:#42616d;cursor:pointer}
+.profile-card dl dd .patient-control{display:block;margin-top:2px}
