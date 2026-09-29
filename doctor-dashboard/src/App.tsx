@@ -7,7 +7,7 @@ import { DoctorProfilePage } from './components/DoctorProfilePage'
 import { DoctorSettingsPage } from './components/DoctorSettingsPage'
 import DoctorPicker from './components/DoctorPicker'
 import { LoginPage } from './components/LoginPage'
-type Doctor = { id: number; name: string; initials: string; color?: string }
+import type { Doctor } from './types/doctor'
 import RecentActivitySummary from './components/RecentActivitySummary'
 import { evaluateGoal, type EvaluationType, type GoalFrequency } from './lib/goalEvaluator'
 
