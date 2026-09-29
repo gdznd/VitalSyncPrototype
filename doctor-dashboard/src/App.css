@@ -116,7 +116,7 @@
 .registry-tabs button.active { color: #fff; background: var(--teal); }
 .registry-controls input { width: min(300px, 100%); padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-panel); font: inherit; font-size: 12px; }
 .registry-list { display: grid; gap: 10px; }
-.registry-card { width: 100%; display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 13px; padding: 14px 16px; border: 1px solid var(--line); border-left: 4px solid #62a98e; border-radius: 8px; background: var(--bg-panel); text-align: left; }
+.registry-card { width: 100%; display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 13px; padding: 14px 16px; border: 1px solid var(--line); border-left: 6px solid #62a98e; border-radius: 8px; background: var(--bg-panel); text-align: left; }
 .registry-card:hover { background: #f6fbfb; }
 .registry-card.high { border-left-color: #d35c57; }.registry-card.medium { border-left-color: #d9a83e; }.registry-card.low { border-left-color: #62a98e; }
 .registry-card > span:nth-child(2) { display: grid; gap: 3px; }.registry-card strong { color: var(--ink); font-size: 13px; }.registry-card small { color: #7d8c92; font-size: 11px; }.registry-card em { color: #61747d; font-size: 11px; font-style: normal; font-weight: 700; }.registry-empty { padding: 40px; color: #849299; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font-size: 12px; }
