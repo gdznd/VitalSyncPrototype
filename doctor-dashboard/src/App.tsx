@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { api, clearAuthToken, getAuthToken, type AuthUser } from './lib/api';
 import './App.css'
 import './PrototypeExtras.css'
 import './PrototypeExtras.addons.css'
@@ -8,6 +9,7 @@ import { DoctorSettingsPage } from './components/DoctorSettingsPage'
 import DoctorPicker from './components/DoctorPicker'
 import { LoginPage } from './components/LoginPage'
 type Doctor = { id: number; name: string; initials: string; color?: string }
+import type { PatientConversationMessage } from './lib/api'
 import RecentActivitySummary from './components/RecentActivitySummary'
 import { evaluateGoal, type EvaluationType, type GoalFrequency } from './lib/goalEvaluator'
 
@@ -15,7 +17,7 @@ import { evaluateGoal, type EvaluationType, type GoalFrequency } from './lib/goa
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
 
 type Range = 'Today' | 'Past 3 days' | 'Past week' | 'Past month'
-type DoctorAccount = { id: number; name: string; email: string; password: string; specialty: string; initials: string; color: string }
+type DoctorSession = { id: number; name: string; email: string; specialty: string; initials: string; color: string }
 type Patient = {
   id: number; name: string; initials: string; age: number; residence: string; care: string; phone: string; email: string
   detail: string; status: 'Needs attention' | 'On track' | 'Follow up'; priority: 'High' | 'Medium' | 'Low'; type: 'Out-patient' | 'In-patient'; color: string; assignedSince?: string; followUpDate: string; uniqueId: string; active: boolean; visibility: 'Assigned Only' | 'Selected Doctors' | 'All Doctors'; selectedDoctors?: number[]
@@ -36,25 +38,44 @@ type ProviderGoal = {
   progressPercent: number
   assignedBy: string
   evaluationType?: EvaluationType
-  targetValue?: number
+  targetValue?: number | null
   targetUnit?: string
   metricKey?: string
 }
+type GoalLog = { id: number; type: string; date: string; time: string; title: string; detail: string; extra?: string }
+type GoalTrackingMode = 'none' | 'food' | 'activity' | 'sleep' | 'medication' | 'stress' | 'social' | 'habit'
 
-const providerGoalStorageKey = 'vitalsync_provider_goals_v1'
+const goalTrackingOptions = {
+  none: { label: 'Not automatically evaluated', evaluationType: 'none' },
+  food: { label: 'Food log recorded', evaluationType: 'indicator', metricKey: 'food' },
+  activity: { label: 'Activity duration', evaluationType: 'duration', metricKey: 'activity' },
+  sleep: { label: 'Sleep duration', evaluationType: 'duration', metricKey: 'sleep' },
+  medication: { label: 'Medication occurrence', evaluationType: 'occurrence', metricKey: 'medication' },
+  stress: { label: 'Stress reflection', evaluationType: 'reflection', metricKey: 'stress' },
+  social: { label: 'Social reflection', evaluationType: 'reflection', metricKey: 'social' },
+  habit: { label: 'Lifestyle habits reflection', evaluationType: 'reflection', metricKey: 'habit' },
+} as const
+
+function getGoalTrackingMode(goal: ProviderGoal | null, template: typeof providerGoalTemplates[number] | null): GoalTrackingMode {
+  const evaluationType = goal?.evaluationType ?? template?.evaluationType ?? 'none'
+  const metricKey = goal?.metricKey ?? template?.metricKey
+  if (evaluationType === 'indicator' && metricKey === 'food') return 'food'
+  if (evaluationType === 'duration' && metricKey === 'activity') return 'activity'
+  if (evaluationType === 'duration' && metricKey === 'sleep') return 'sleep'
+  if (evaluationType === 'occurrence' && metricKey === 'medication') return 'medication'
+  if (evaluationType === 'reflection' && (metricKey === 'stress' || metricKey === 'social' || metricKey === 'habit')) return metricKey
+  return 'none'
+}
+
 const providerGoalTemplates = [
   { id: 'eat-veg', title: 'Eat more vegetables', category: 'Nutrition', target: '1 serving', frequency: 'Daily', evaluationType: 'indicator' as const, targetValue: 1, metricKey: 'food' },
-  { id: 'drink-water', title: 'Drink more water', category: 'Nutrition', target: '8 glasses', frequency: 'Daily', evaluationType: 'indicator' as const, targetValue: 1, metricKey: 'food' },
+  { id: 'drink-water', title: 'Drink more water', category: 'Nutrition', target: '8 glasses', frequency: 'Daily', evaluationType: 'none' as const },
   { id: 'walk-every-day', title: 'Walk every day', category: 'Physical Activity', target: '30 minutes', frequency: 'Daily', evaluationType: 'duration' as const, targetValue: 30, metricKey: 'activity' },
   { id: 'improve-sleep', title: 'Improve sleep schedule', category: 'Sleep', target: '7 hours', frequency: 'Daily', evaluationType: 'duration' as const, targetValue: 7, metricKey: 'sleep' },
   { id: 'stress-management', title: 'Practice stress management', category: 'Stress', target: '10 minutes', frequency: 'Daily', evaluationType: 'reflection' as const, targetValue: 1, metricKey: 'stress' },
   { id: 'social-time', title: 'Spend quality time', category: 'Social Connectedness', target: '3 times', frequency: 'Weekly', evaluationType: 'reflection' as const, targetValue: 3, metricKey: 'social' },
   { id: 'custom', title: 'Build My Own Goal', category: 'Other', target: '', frequency: 'Daily', evaluationType: 'none' as const },
 ]
-
-const readProviderGoals = (): ProviderGoal[] => {
-  try { return JSON.parse(localStorage.getItem(providerGoalStorageKey) ?? '[]') as ProviderGoal[] } catch { return [] }
-}
 
 const followUpPriority = (followUpDate: string): Patient['priority'] => {
   const days = Math.ceil((new Date(`${followUpDate}T00:00:00`).getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000)
@@ -75,20 +96,17 @@ const doctors: Doctor[] = [
   { id: 103, name: 'Dr. Ana Cruz', initials: 'AC', color: '#d6f9d6' },
 ]
 
-const doctorAccountStorageKey = 'vitalsync_doctor_accounts_v1'
-const defaultDoctorAccounts: DoctorAccount[] = [
-  { id: 101, name: 'Dr. Jamie Dizon', email: 'jamie@vitalsync.com', password: 'clinic123', specialty: 'Lifestyle Medicine', initials: 'JD', color: '#f9c6c6' },
-  { id: 102, name: 'Dr. Rafael Lopez', email: 'rafael@vitalsync.com', password: 'clinic123', specialty: 'Cardiology', initials: 'RL', color: '#c6e1f9' },
-  { id: 103, name: 'Dr. Ana Cruz', email: 'ana@vitalsync.com', password: 'clinic123', specialty: 'Rehab', initials: 'AC', color: '#d6f9d6' },
-]
-const readDoctorAccounts = (): DoctorAccount[] => {
-  try {
-    const stored = localStorage.getItem(doctorAccountStorageKey)
-    if (!stored) return defaultDoctorAccounts
-    const parsed = JSON.parse(stored) as DoctorAccount[]
-    return parsed.length ? parsed : defaultDoctorAccounts
-  } catch {
-    return defaultDoctorAccounts
+const defaultDoctorSession: DoctorSession = { id: 0, name: 'Doctor', email: '', specialty: 'VitalSync clinician', initials: 'DR', color: '#d9ecf1' }
+
+const toDoctorSession = (user: AuthUser): DoctorSession => {
+  const name = user.name?.trim() || user.email
+  return {
+    id: user.id,
+    name,
+    email: user.email,
+    specialty: user.specialty?.trim() || 'VitalSync clinician',
+    initials: user.initials?.trim() || name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase(),
+    color: user.display_color || '#d9ecf1',
   }
 }
 
@@ -108,6 +126,7 @@ const monitoringHistory: Record<number, { focus: string; period: string; clinici
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
   const [active, setActive] = useState('Registry')
   const [records, setRecords] = useState<Patient[]>(initialPatients)
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null)
@@ -123,9 +142,101 @@ function App() {
   const [reminders, setReminders] = useState<number[]>([])
   const [copied, setCopied] = useState(false)
   const [notice, setNotice] = useState('')
-  const [providerGoals, setProviderGoals] = useState<ProviderGoal[]>(readProviderGoals)
-  const [doctorAccounts, setDoctorAccounts] = useState<DoctorAccount[]>(readDoctorAccounts)
-  const [currentDoctor, setCurrentDoctor] = useState<DoctorAccount>(() => defaultDoctorAccounts[0])
+  const [providerGoals, setProviderGoals] = useState<ProviderGoal[]>([])
+  const [directoryDoctors, setDirectoryDoctors] = useState<Doctor[]>([])
+  const [currentDoctor, setCurrentDoctor] = useState<DoctorSession>(defaultDoctorSession)
+
+// 1. Feature State
+  const [quickNote, setQuickNote] = useState<string>('')
+  const [doctorNotes, setDoctorNotes] = useState<string[]>(() => {
+    const saved = localStorage.getItem('doctor_notes')
+    return saved ? JSON.parse(saved) : []
+  })
+
+useEffect(() => {
+  let active = true
+
+  async function restoreSession() {
+    if (!getAuthToken()) {
+      setSessionReady(true)
+      return
+    }
+
+    try {
+      const { user } = await api.getMe()
+      if (user.role !== 'doctor') {
+        clearAuthToken()
+        return
+      }
+      if (active) {
+        setCurrentDoctor(toDoctorSession(user))
+        setIsLoggedIn(true)
+      }
+    } catch {
+      if (active) setIsLoggedIn(false)
+    } finally {
+      if (active) setSessionReady(true)
+    }
+  }
+
+  void restoreSession()
+  return () => { active = false }
+}, [])
+
+useEffect(() => {
+  if (!isLoggedIn) return;
+
+  async function loadPatients() {
+    try {
+      const [activeResponse, inactiveResponse] = await Promise.all([api.getPatients(true), api.getPatients(false)]);
+      const mappedPatients = [...activeResponse.patients, ...inactiveResponse.patients].map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+        uniqueId: p.unique_id,
+        age: p.age,
+        initials: p.name.split(/\s+/).filter(Boolean).map((part: string) => part[0]).slice(0, 2).join('').toUpperCase(),
+        type: p.patient_type || 'Out-patient',
+        visibility: p.visibility || 'Assigned Only',
+        selectedDoctors: p.selected_doctor_ids || [],
+        priority: p.priority || 'Medium',
+        status: p.status || 'On track',
+        active: p.monitoring_active,
+        phone: p.phone || '',
+        care: p.care_focus || 'General lifestyle care',
+        followUpDate: p.follow_up_date || '',
+        detail: p.monitoring_active ? 'No activity recorded yet' : 'Monitoring archived',
+        residence: 'Not specified',
+        color: '#b8d5c9',
+        managingDoctor: p.managing_doctor_name,
+      }));
+      setRecords(mappedPatients);
+    } catch (err) {
+      console.error('Failed to fetch patients:', err);
+    }
+  }
+
+  loadPatients();
+  api.getDoctors()
+    .then(({ doctors: profileDoctors }) => setDirectoryDoctors(profileDoctors))
+    .catch((err) => console.error('Failed to fetch doctor directory:', err));
+}, [isLoggedIn]);
+
+useEffect(() => {
+  if (!isLoggedIn || selectedPatientId === null) return;
+  let active = true;
+
+  api.getProviderGoals(selectedPatientId)
+    .then(({ goals }) => { if (active) setProviderGoals(goals); })
+    .catch((err) => { if (active) notify(`Could not load assigned goals: ${err.message}`); });
+
+  return () => { active = false; };
+}, [isLoggedIn, selectedPatientId]);
+
+// 2. Persist notes whenever doctorNotes changes
+  useEffect(() => {
+    localStorage.setItem('doctor_notes', JSON.stringify(doctorNotes))
+  }, [doctorNotes])
 
   const notify = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(''), 2600) }
   const selectedPatient = records.find((patient) => patient.id === selectedPatientId) ?? null
@@ -141,68 +252,113 @@ function App() {
     setRecords((current) => isNew ? [...current, patient] : current.map((item) => item.id === patient.id ? patient : item))
     setSelectedPatientId(patient.id); setFormPatient(null); notify(isNew ? `${patient.name} was added to your patients.` : `${patient.name}'s profile was updated.`)
   }
-  const addNewPatient = (name: string, email: string, phone?: string) => {
-    const id = Math.max(...records.map((item) => item.id)) + 1
-    const initials = name.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'NP'
-    const patient: Patient = { id, name, initials, age: 0, residence: 'Not specified', care: 'General lifestyle care', phone: phone ?? '+63 917 000 0000', email, detail: 'Newly added patient', status: 'On track', priority: 'Low', type: 'Out-patient', color: '#b8d5c9', assignedSince: '2026-08-15', followUpDate: '2026-08-30', uniqueId: `VS-${String(id).padStart(4, '0')}`, active: true, visibility: 'Assigned Only', managingDoctor: undefined }
-    setRecords((current) => [...current, patient]); setShowAddPatient(false); notify(`${patient.name} was added to active monitoring.`)
+  const addNewPatient = async (name: string, email: string, phone?: string) => {
+    const response = await api.createPatient({ name, email, phone })
+    const created = response.patient
+    const initials = created.name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'NP'
+    const patient: Patient = {
+      id: created.id,
+      name: created.name,
+      initials,
+      age: created.age ?? 0,
+      residence: 'Not specified',
+      care: created.care_focus || 'General lifestyle care',
+      phone: created.phone || '',
+      email: created.email,
+      detail: 'No activity recorded yet',
+      status: created.status,
+      priority: created.priority,
+      type: created.patient_type,
+      color: '#b8d5c9',
+      followUpDate: created.follow_up_date || '',
+      uniqueId: created.unique_id,
+      active: created.monitoring_active,
+      visibility: 'Assigned Only',
+      managingDoctor: currentDoctor.name,
+    }
+    setRecords((current) => [...current, patient])
+    setShowAddPatient(false)
+    notify(response.message)
   }
-  const reactivatePatient = (uniqueId: string) => {
+  const reactivatePatient = async (uniqueId: string) => {
     const patient = records.find((item) => item.uniqueId.toLowerCase() === uniqueId.trim().toLowerCase())
     if (!patient) return notify('No patient account matches that Unique ID.')
     if (patient.active) return notify(`${patient.name} is already in active monitoring.`)
-    setRecords((current) => current.map((item) => item.id === patient.id ? { ...item, active: true } : item)); setShowAddPatient(false); notify(`${patient.name} was re-added to active monitoring.`)
+    try {
+      const response = await api.reactivatePatient(uniqueId)
+      setRecords((current) => current.map((item) => item.id === patient.id ? { ...item, active: true } : item))
+      setShowAddPatient(false)
+      notify(response.message)
+    } catch (error) {
+      notify(`Could not reactivate monitoring: ${error instanceof Error ? error.message : 'Server error'}`)
+    }
   }
 
-  const updateFollowUpDate = (id: number, newDate: string) => {
-    setRecords((current) => current.map((item) => item.id === id ? { ...item, followUpDate: newDate, priority: followUpPriority(newDate) } : item))
-    notify('Follow-up date updated.')
+  const updateFollowUpDate = async (id: number, newDate: string) => {
+    try {
+      await api.updatePatientFollowUp(id, newDate)
+      setRecords((current) => current.map((item) => item.id === id ? { ...item, followUpDate: newDate, priority: newDate ? followUpPriority(newDate) : item.priority } : item))
+      notify('Follow-up date updated.')
+    } catch (error) {
+      notify(`Could not update follow-up date: ${error instanceof Error ? error.message : 'Server error'}`)
+    }
   }
 
-  const updatePatientVisibility = (id: number, visibility: Patient['visibility'], selectedDoctors?: number[]) => {
-    setRecords((current) => current.map((item) => item.id === id ? { ...item, visibility, ...(selectedDoctors ? { selectedDoctors } : {}) } : item))
+  const updatePatientVisibility = async (id: number, visibility: Patient['visibility'], selectedDoctors: number[] = []): Promise<boolean> => {
+    try {
+      const { patient: updated } = await api.updatePatientVisibility(id, visibility, selectedDoctors)
+      setRecords((current) => current.map((item) => item.id === id ? { ...item, visibility: updated.visibility, selectedDoctors: updated.selected_doctor_ids } : item))
+      return true
+    } catch (error) {
+      notify(`Could not update visibility: ${error instanceof Error ? error.message : 'Server error'}`)
+      return false
+    }
   }
-  const archivePatient = (patient: Patient) => {
-    setRecords((current) => {
-      const next = current.map((item) => item.id === patient.id ? { ...item, active: false } : item)
-      return next
-    })
-    returnToRegistry(); notify(`${patient.name}'s monitoring was archived. Their account and history remain available.`)
+  const archivePatient = async (patient: Patient) => {
+    try {
+      const response = await api.archivePatient(patient.id)
+      setRecords((current) => current.map((item) => item.id === patient.id ? { ...item, active: false } : item))
+      returnToRegistry()
+      notify(response.message)
+    } catch (error) {
+      notify(`Could not archive monitoring: ${error instanceof Error ? error.message : 'Server error'}`)
+    }
   }
   const returnToRegistry = () => { setSelectedPatientId(null); setActive('Registry'); window.scrollTo(0, 0) }
-  const handleLogout = () => { setIsLoggedIn(false); setSelectedPatientId(null); setActive('Registry') }
+  const handleLogout = () => { clearAuthToken(); setIsLoggedIn(false); setSelectedPatientId(null); setActive('Registry') }
   const selectNav = (item: string) => { setActive(item); notify(`${item} prototype view selected`) }
-  const saveProviderGoals = (goals: ProviderGoal[]) => { setProviderGoals(goals); localStorage.setItem(providerGoalStorageKey, JSON.stringify(goals)) }
-  const handleDoctorLogin = (email: string, password: string): boolean => {
-    const account = doctorAccounts.find((item) => item.email.toLowerCase() === email.trim().toLowerCase() && item.password === password)
-    if (!account) return false
-    setCurrentDoctor(account)
-    setIsLoggedIn(true)
-    setActive('Registry')
-    return true
-  }
-  const handleCreateDoctorAccount = (account: { name: string; email: string; password: string; specialty: string }): boolean => {
-    const trimmedName = account.name.trim()
-    const trimmedEmail = account.email.trim()
-    if (!trimmedName || !trimmedEmail || !account.password.trim()) return false
-    const duplicate = doctorAccounts.some((item) => item.email.toLowerCase() === trimmedEmail.toLowerCase())
-    if (duplicate) return false
-    const newAccount: DoctorAccount = {
-      id: Date.now(),
-      name: trimmedName,
-      email: trimmedEmail,
-      password: account.password,
-      specialty: account.specialty.trim() || 'Lifestyle Medicine',
-      initials: trimmedName.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'DR',
-      color: '#d9ecf1',
+  const saveProviderGoals = async (goals: ProviderGoal[]) => {
+    if (selectedPatientId === null) return;
+    try {
+      const response = await api.saveProviderGoals(selectedPatientId, goals);
+      setProviderGoals(response.goals);
+      notify('Assigned goals saved.')
+    } catch (err) {
+      notify(`Could not save assigned goals: ${err instanceof Error ? err.message : 'Server error'}`)
     }
-    const nextAccounts = [...doctorAccounts, newAccount]
-    setDoctorAccounts(nextAccounts)
-    localStorage.setItem(doctorAccountStorageKey, JSON.stringify(nextAccounts))
-    setCurrentDoctor(newAccount)
-    return true
   }
-  if (!isLoggedIn) return <LoginPage onLogin={handleDoctorLogin} onCreateDoctor={handleCreateDoctorAccount} />
+// ✅ UPDATED CODE
+const handleDoctorLogin = (user: AuthUser): void => {
+  setCurrentDoctor(toDoctorSession(user))
+  setIsLoggedIn(true)
+  setActive('Registry')
+}
+
+  // 3. Action Handlers
+  const handleAddNote = () => {
+    if (!quickNote.trim()) return
+    setDoctorNotes((prev) => [quickNote, ...prev])
+    setQuickNote('')
+    notify('Note saved successfully!')
+  }
+
+  const handleDeleteNote = (index: number) => {
+    setDoctorNotes((prev) => prev.filter((_, i) => i !== index))
+    notify('Note deleted.')
+  }
+
+  if (!sessionReady) return <main aria-busy="true">Restoring session...</main>
+  if (!isLoggedIn) return <LoginPage onLogin={handleDoctorLogin} />
   return <main className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">✦</span><span>VitalSync</span></div>
@@ -226,7 +382,17 @@ function App() {
       <div className="sidebar-footer"><DoctorProfileCard initials={currentDoctor.initials} name={currentDoctor.name} specialty={currentDoctor.specialty} onProfile={() => selectNav('Profile')} onSettings={() => selectNav('Settings')} onLogout={handleLogout} /></div>
     </aside>
     <section className="workspace">
-    {active === 'Profile' ? <DoctorProfilePage /> : active === 'Settings' ? <DoctorSettingsPage /> : active === 'Team' && !selectedPatient ? <TeamView doctors={doctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} providerGoals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSaveProviderGoals={saveProviderGoals} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onMessageSelect={setMessagePatientId} onHistorySelect={setHistoryPatientId} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={doctors} activities={activities} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />}
+    {/* 4. Render Feature UI View */}
+    {active === 'Notes' && (
+      <NotesWidget 
+        currentNote={quickNote} 
+        notes={doctorNotes} 
+        onNoteChange={setQuickNote} 
+        onAdd={handleAddNote} 
+        onDelete={handleDeleteNote} 
+      />
+    )}
+    {active === 'Profile' ? <DoctorProfilePage /> : active === 'Settings' ? <DoctorSettingsPage /> : active === 'Team' && !selectedPatient ? <TeamView doctors={doctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} providerGoals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSaveProviderGoals={saveProviderGoals} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onMessageSelect={setMessagePatientId} onHistorySelect={setHistoryPatientId} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={directoryDoctors} activities={activities} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />}
       {false && <>
         <header className="topbar"><div><p className="eyebrow">TUESDAY, JULY 31</p><h1>Good morning, Dr. Dizon</h1></div><div className="top-actions"><button className="icon-button" onClick={() => notify('No new notifications.')}>♧<span className="notification-dot" /></button><button className="primary" onClick={() => notify('Patient enrollment form would open here.')}>+ Add patient</button></div></header>
         {active === 'Overview' ? <Overview patients={records} range={range} setRange={setRange} activityRange={activityRange} setActivityRange={setActivityRange} onPatients={() => selectNav('Patients')} onProfile={goToPatient} onAllActivity={() => setShowAllActivity(true)} reminders={reminders} onReminder={toggleReminder} /> : active === 'Messages' ? <MessagesView patients={records} selected={messagePatient} onSelect={setMessagePatientId} /> : active === 'History' ? <HistoryView patients={records} selectedId={historyPatientId} onSelect={setHistoryPatientId} /> : <EmptyView name={active} />}
@@ -255,12 +421,12 @@ function Overview({ patients, range, setRange, activityRange, setActivityRange, 
   </>
 }
 
-export function PatientsView({ patients, selected, onSelect, onContact, onReminder, reminders, onBack, onAdd, onEdit, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patients: Patient[]; selected: Patient | null; onSelect: (p: Patient) => void; onContact: (p: Patient) => void; onReminder: (p: Patient) => void; reminders: number[]; onBack: () => void; onAdd: () => void; onEdit: () => void; onUpdateFollowUp?: (id: number, d: string) => void; onUpdateVisibility?: (id: number, v: Patient['visibility'], s?: number[]) => void; doctors?: Doctor[]; activities?: string[][] }) {
+export function PatientsView({ patients, selected, onSelect, onContact, onReminder, reminders, onBack, onAdd, onEdit, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patients: Patient[]; selected: Patient | null; onSelect: (p: Patient) => void; onContact: (p: Patient) => void; onReminder: (p: Patient) => void; reminders: number[]; onBack: () => void; onAdd: () => void; onEdit: () => void; onUpdateFollowUp?: (id: number, d: string) => void; onUpdateVisibility?: (id: number, v: Patient['visibility'], s?: number[]) => Promise<boolean>; doctors?: Doctor[]; activities?: string[][] }) {
   return <>
     <header className="patients-header"><div><p className="eyebrow">PATIENT MANAGEMENT</p><h1>Patients</h1><p className="header-copy">Monitor patient lifestyle progress and follow up when needed.</p></div><button className="primary" onClick={onAdd}>+ Add patient</button></header>
     <div className={selected ? 'patients-layout profile-open' : 'patients-layout'}>
       <aside className="patient-directory"><div className="directory-heading"><strong>All patients</strong><span>{patients.length}</span></div><div className="directory-search">⌕ <span>Search patients</span></div><div className="directory-list">{patients.map((p) => <button className={selected?.id === p.id ? 'directory-item selected' : 'directory-item'} onClick={() => onSelect(p)} key={p.id}><span className="avatar" style={{ background: p.color }}>{p.initials}</span><span><strong>{p.name}</strong><small>{p.care}</small><em className={`priority ${p.priority.toLowerCase()}`}>{p.priority}</em><em className="patient-type">{p.type}</em></span></button>)}</div></aside>
-      {selected ? <PatientProfile patient={selected} onContact={() => onContact(selected)} onReminder={() => onReminder(selected)} reminderSet={reminders.includes(selected.id)} onBack={onBack} onEdit={onEdit} onArchive={() => undefined} onUpdateFollowUp={onUpdateFollowUp ?? (() => {})} onUpdateVisibility={onUpdateVisibility ?? (() => {})} doctors={doctors ?? []} activities={activities ?? []} /> : <div className="select-patient"><div className="select-icon">♙</div><h2>Select a patient</h2><p>Choose a patient from the list to view their profile and lifestyle progress.</p></div>}
+      {selected ? <PatientProfile patient={selected} onContact={() => onContact(selected)} onReminder={() => onReminder(selected)} reminderSet={reminders.includes(selected.id)} onBack={onBack} onEdit={onEdit} onArchive={() => undefined} onUpdateFollowUp={onUpdateFollowUp ?? (() => {})} onUpdateVisibility={onUpdateVisibility ?? (async () => false)} doctors={doctors ?? []} activities={activities ?? []} /> : <div className="select-patient"><div className="select-icon">♙</div><h2>Select a patient</h2><p>Choose a patient from the list to view their profile and lifestyle progress.</p></div>}
     </div>
   </>
 }
@@ -272,7 +438,7 @@ function PatientRegistry({ patients, onRequestOpen, onAdd }: { patients: Patient
   return <section className="registry-page"><header className="patients-header"><div><p className="eyebrow">PATIENT REGISTRY</p><h1>Active Patients</h1><p className="header-copy">Review active lifestyle-monitoring patients and open their clinical workspace.</p></div><button className="primary" onClick={onAdd}>+ Add patient</button></header><div className="registry-controls"><div className="registry-tabs"><button className={tab === 'Out-patient' ? 'active' : ''} onClick={() => setTab('Out-patient')}>Outpatient</button><button className={tab === 'In-patient' ? 'active' : ''} onClick={() => setTab('In-patient')}>Inpatient</button></div><input aria-label="Search patients by name" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients by name" /></div><div className="registry-list">{activePatients.map((patient) => <button className={`registry-card ${patient.priority.toLowerCase()}`} key={patient.id} onClick={() => onRequestOpen(patient)}><span className="avatar" style={{ background: patient.color }}>{patient.initials}</span><span><strong>{patient.name}</strong><small>{patient.uniqueId}</small><small>{patient.email}</small></span><em>{patient.priority}</em></button>)}{activePatients.length === 0 && <div className="registry-empty">No active {tab === 'In-patient' ? 'inpatients' : 'outpatients'} match this search.</div>}</div></section>
 }
 
-function PatientWorkspace({ patient, active, providerGoals, currentDoctorName, onSaveProviderGoals, onReturn, onContact, onReminder, reminderSet, onEdit, onArchive, onMessageSelect, onHistorySelect, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; active: string; providerGoals: ProviderGoal[]; currentDoctorName: string; onSaveProviderGoals: (goals: ProviderGoal[]) => void; onReturn: () => void; onContact: () => void; onReminder: () => void; reminderSet: boolean; onEdit: () => void; onArchive: () => void; onMessageSelect: (id: number) => void; onHistorySelect: (id: number) => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities: string[][] }) {
+function PatientWorkspace({ patient, active, providerGoals, currentDoctorName, onSaveProviderGoals, onReturn, onContact, onReminder, reminderSet, onEdit, onArchive, onMessageSelect, onHistorySelect, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; active: string; providerGoals: ProviderGoal[]; currentDoctorName: string; onSaveProviderGoals: (goals: ProviderGoal[]) => void; onReturn: () => void; onContact: () => void; onReminder: () => void; reminderSet: boolean; onEdit: () => void; onArchive: () => void; onMessageSelect: (id: number) => void; onHistorySelect: (id: number) => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => Promise<boolean>; doctors: Doctor[]; activities: string[][] }) {
   if (active === 'Messages') return <MessagesView patients={[patient]} selected={patient} onSelect={onMessageSelect} />
   if (active === 'Goals') return <PatientGoalsView patient={patient} goals={providerGoals} currentDoctorName={currentDoctorName} onSave={onSaveProviderGoals} />
   if (active === 'History') return <HistoryView patients={[patient]} selectedId={patient.id} onSelect={onHistorySelect} />
@@ -287,27 +453,23 @@ function PatientGoalsView({ patient, goals, currentDoctorName, onSave }: { patie
   const activeGoals = goals.filter((goal) => goal.status === 'Active' || goal.status === 'Paused')
   const updateGoal = (goalId: number, changes: Partial<ProviderGoal>) => onSave(goals.map((goal) => goal.id === goalId ? { ...goal, ...changes } : goal))
 
-  const getPatientLogs = (patientUniqueId: string) => {
-    try {
-      const raw = localStorage.getItem('vitalsync_logs_v1')
-      if (!raw) return []
-      const parsed = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return []
-      return parsed.filter((l: any) => (l.patientUniqueId || 'VS-0002') === patientUniqueId)
-    } catch {
-      return []
-    }
-  }
+  const [patientLogs, setPatientLogs] = useState<GoalLog[]>([])
+  const [logLoadError, setLogLoadError] = useState('')
 
-  const patientLogs = getPatientLogs(patient.uniqueId)
+  useEffect(() => {
+    let active = true
+    api.getPatientLogs(patient.id)
+      .then(({ logs }) => { if (active) setPatientLogs(logs); })
+      .catch((error) => { if (active) setLogLoadError(error instanceof Error ? error.message : 'Could not load patient logs.'); })
+    return () => { active = false }
+  }, [patient.id])
 
   return <section className="goals-page"><header className="patients-header"><div><p className="eyebrow">PATIENT GOALS</p><h1>Goals</h1><p className="header-copy">Goals assigned to {patient.name}.</p></div><button className="primary" onClick={() => setTemplateOpen(true)}>+ Assign Goal</button></header>
+    {logLoadError && <p className="inline-note error" role="alert">{logLoadError}</p>}
     {activeGoals.length === 0 ? <div className="goals-empty"><div className="select-icon">✦</div><h2>No goals assigned yet</h2><p>Create a lifestyle goal to support this patient’s monitoring plan.</p><button className="primary" onClick={() => setTemplateOpen(true)}>+ Assign Goal</button></div> : <><div className="goals-section-heading"><h2>Active Goals</h2><span>{activeGoals.length}</span></div><div className="doctor-goals-list">{activeGoals.map((goal) => {
-      const evaluation = evaluateGoal(goal, patientLogs)
-      const displayPercentage = evaluation.evaluable ? evaluation.percentage : goal.progressPercent
-      const displayProgressText = evaluation.evaluable ? evaluation.progressText : 'Progress not automatically evaluated'
+      const evaluation = evaluateGoal({ ...goal, targetValue: goal.targetValue ?? undefined }, patientLogs)
       return (
-        <article className="doctor-goal-card" key={goal.id}><div className="doctor-goal-main"><div className="goal-symbol">✦</div><div><div className="doctor-goal-title"><h3>{goal.title}</h3><span className={`goal-status ${goal.status.toLowerCase()}`}>{goal.status}</span></div><p className="goal-category">{goal.category}</p><p className="goal-target"><strong>Target:</strong> {goal.target || 'Not specified'} · <strong>Frequency:</strong> {goal.frequency}</p><div className="progress-bar-bg" style={{ marginTop: '6px' }}><div className="progress-bar-fill" style={{ width: `${displayPercentage}%` }} /></div><p className="goal-target" style={{ marginTop: '4px' }}><strong>Progress:</strong> {displayProgressText}</p><p className="goal-dates"><strong>Start:</strong> {goal.startDate} · <strong>Review:</strong> {goal.reviewDate}</p>{goal.instructions && <p className="goal-instructions">{goal.instructions}</p>}</div></div><div className="goal-actions-menu"><button aria-label={`Actions for ${goal.title}`} onClick={() => setMenuGoalId(menuGoalId === goal.id ? null : goal.id)}>•••</button>{menuGoalId === goal.id && <div className="goal-action-popover"><button onClick={() => { setEditingGoal(goal); setMenuGoalId(null) }}>Edit Goal</button><button onClick={() => { updateGoal(goal.id, { status: 'Paused' }); setMenuGoalId(null) }}>Pause Goal</button><button onClick={() => { updateGoal(goal.id, { status: 'Completed' }); setMenuGoalId(null) }}>Complete Goal</button></div>}</div></article>
+        <article className="doctor-goal-card" key={goal.id}><div className="doctor-goal-main"><div className="goal-symbol">✦</div><div><div className="doctor-goal-title"><h3>{goal.title}</h3><span className={`goal-status ${goal.status.toLowerCase()}`}>{goal.status}</span></div><p className="goal-category">{goal.category}</p><p className="goal-target"><strong>Target:</strong> {goal.target || 'Not specified'} · <strong>Frequency:</strong> {goal.frequency}</p>{evaluation.evaluable ? <><div className="progress-bar-bg" style={{ marginTop: '6px' }}><div className="progress-bar-fill" style={{ width: `${evaluation.percentage}%` }} /></div><p className="goal-target" style={{ marginTop: '4px' }}><strong>Progress:</strong> {evaluation.progressText}</p></> : <p className="goal-target" style={{ marginTop: '8px' }}>Progress not automatically evaluated</p>}<p className="goal-dates"><strong>Start:</strong> {goal.startDate} · <strong>Review:</strong> {goal.reviewDate}</p>{goal.instructions && <p className="goal-instructions">{goal.instructions}</p>}</div></div><div className="goal-actions-menu"><button aria-label={`Actions for ${goal.title}`} onClick={() => setMenuGoalId(menuGoalId === goal.id ? null : goal.id)}>•••</button>{menuGoalId === goal.id && <div className="goal-action-popover"><button onClick={() => { setEditingGoal(goal); setMenuGoalId(null) }}>Edit Goal</button><button onClick={() => { updateGoal(goal.id, { status: 'Paused' }); setMenuGoalId(null) }}>Pause Goal</button><button onClick={() => { updateGoal(goal.id, { status: 'Completed' }); setMenuGoalId(null) }}>Complete Goal</button></div>}</div></article>
       )
     })}</div></>}
     {templateOpen && <GoalTemplateModal onClose={() => setTemplateOpen(false)} onSelect={(template) => { setSelectedTemplate(template); setTemplateOpen(false) }} />}
@@ -327,8 +489,17 @@ function GoalConfigurationModal({ patient, template, goal, currentDoctorName, on
   const [startDate, setStartDate] = useState(goal?.startDate ?? new Date().toISOString().slice(0, 10))
   const [reviewDate, setReviewDate] = useState(goal?.reviewDate ?? '')
   const [instructions, setInstructions] = useState(goal?.instructions ?? '')
+  const [trackingMode, setTrackingMode] = useState<GoalTrackingMode>(() => getGoalTrackingMode(goal, template))
   const submit = (event: React.FormEvent) => { 
     event.preventDefault(); 
+    const tracking = goalTrackingOptions[trackingMode]
+    const previousTrackingMode = getGoalTrackingMode(goal, template)
+    const targetValueText = target.match(/\d+(?:\.\d+)?/)?.[0]
+    const targetValue = trackingMode === 'none'
+      ? undefined
+      : goal && trackingMode === previousTrackingMode
+        ? goal.targetValue ?? undefined
+        : template?.targetValue ?? (targetValueText ? Number(targetValueText) : undefined)
     onSave({ 
       id: goal?.id ?? Date.now(), 
       patientUniqueId: patient.uniqueId, 
@@ -342,21 +513,39 @@ function GoalConfigurationModal({ patient, template, goal, currentDoctorName, on
       status: goal?.status ?? 'Active', 
       progressPercent: goal?.progressPercent ?? 0, 
       assignedBy: goal?.assignedBy ?? currentDoctorName,
-      evaluationType: goal?.evaluationType ?? template?.evaluationType ?? 'none',
-      targetValue: goal?.targetValue ?? template?.targetValue,
-      metricKey: goal?.metricKey ?? template?.metricKey
+      evaluationType: tracking.evaluationType,
+      targetValue,
+      targetUnit: goal?.targetUnit,
+      metricKey: 'metricKey' in tracking ? tracking.metricKey : undefined
     }) 
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal goal-config-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>{goal ? 'Edit Goal' : 'Configure Goal'}</h2><p>Set the details for {patient.name}.</p></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label>Goal<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Nutrition</option><option>Physical Activity</option><option>Sleep</option><option>Stress</option><option>Social Connectedness</option><option>Medication</option><option>Other</option></select></label><label>Target<input required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="e.g. 8 glasses/day" /></label><label>Frequency<select value={frequency} onChange={(event) => setFrequency(event.target.value as GoalFrequency)}><option>Daily</option><option>Weekdays</option><option>Weekly</option></select></label><label>Start date<input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label><label>Review date<input required type="date" value={reviewDate} onChange={(event) => setReviewDate(event.target.value)} /></label><label className="full-width">Instructions / Notes<textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Optional instructions for the patient" /></label></div><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit">{goal ? 'Save changes' : 'Assign Goal'}</button></div></form></div>
+  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal goal-config-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>{goal ? 'Edit Goal' : 'Configure Goal'}</h2><p>Set the details for {patient.name}.</p></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label>Goal<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Nutrition</option><option>Physical Activity</option><option>Sleep</option><option>Stress</option><option>Social Connectedness</option><option>Medication</option><option>Other</option></select></label><label>Target<input required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="e.g. 8 glasses/day" /></label><label>Frequency<select value={frequency} onChange={(event) => setFrequency(event.target.value as GoalFrequency)}><option>Daily</option><option>Weekdays</option><option>Weekly</option></select></label><label className="full-width">Progress measurement<select value={trackingMode} onChange={(event) => setTrackingMode(event.target.value as GoalTrackingMode)}>{Object.entries(goalTrackingOptions).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}</select></label><label>Start date<input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label><label>Review date<input required type="date" value={reviewDate} onChange={(event) => setReviewDate(event.target.value)} /></label><label className="full-width">Instructions / Notes<textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Optional instructions for the patient" /></label></div><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit">{goal ? 'Save changes' : 'Assign Goal'}</button></div></form></div>
 }
 
-function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities: string[][] }) {
+function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => Promise<boolean>; doctors: Doctor[]; activities?: string[][] }) {
   const [followUp, setFollowUp] = useState(patient.followUpDate)
   const [vis, setVis] = useState<Patient['visibility']>(patient.visibility)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selectedDoctors, setSelectedDoctors] = useState<number[]>(patient.selectedDoctors ?? [])
+  const [visibilitySaving, setVisibilitySaving] = useState(false)
   const handleFollowUp = (val: string) => { setFollowUp(val); onUpdateFollowUp(patient.id, val) }
-  const handleVisibility = (v: Patient['visibility']) => { setVis(v); if (v !== 'Selected Doctors') onUpdateVisibility(patient.id, v); else setPickerOpen(true) }
+  const saveVisibility = async (visibility: Patient['visibility'], doctorIds: number[] = []) => {
+    setVisibilitySaving(true)
+    const saved = await onUpdateVisibility(patient.id, visibility, doctorIds)
+    setVisibilitySaving(false)
+    if (saved) {
+      setVis(visibility)
+      setSelectedDoctors(doctorIds)
+      if (visibility === 'Selected Doctors') setPickerOpen(false)
+    }
+  }
+  const handleVisibility = (visibility: Patient['visibility']) => {
+    if (visibility === 'Selected Doctors') {
+      setPickerOpen(true)
+      return
+    }
+    void saveVisibility(visibility)
+  }
   const selectedDoctorNames = doctors.filter((doctor) => selectedDoctors.includes(doctor.id)).map((doctor) => doctor.name)
   return <section className="patient-profile"><button className="back-button" onClick={onBack}>← Return to Registry</button><article className="profile-hero"><div className="profile-person"><span className="avatar profile-avatar" style={{ background: patient.color }}>{patient.initials}</span><div><h2>{patient.name}</h2><p>{patient.age} years old · {patient.residence}</p><p className="care-label">{patient.care}</p></div></div><div className="profile-actions"><button onClick={onContact}>Contact</button><button onClick={onReminder}>{reminderSet ? 'Reminder set' : 'Set reminder'}</button><button className="edit-button" onClick={onEdit}>Manage</button><button className="archive-button" onClick={onArchive}>Archive monitoring</button></div></article>
     <div className="profile-grid">
@@ -364,7 +553,7 @@ function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, o
         <dl>
           <div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div>
           <div><dt>Visibility</dt><dd>
-            <select className="patient-control patient-visibility-control" aria-label="Patient visibility" value={vis} onChange={(e) => handleVisibility(e.target.value as Patient['visibility'])}>
+            <select className="patient-control patient-visibility-control" aria-label="Patient visibility" value={vis} disabled={visibilitySaving} onChange={(e) => handleVisibility(e.target.value as Patient['visibility'])}>
               <option>Assigned Only</option>
               <option>Selected Doctors</option>
               <option>All Doctors</option>
@@ -379,8 +568,8 @@ function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, o
       </article>
       <article className="profile-card"><h3>Today’s log</h3><div className="log-summary"><span>🍽</span><div><strong>Breakfast submitted</strong><p>8:14 AM · On time</p></div></div><div className="log-summary"><span>☾</span><div><strong>Sleep pending</strong><p>Due by 10:00 AM</p></div></div></article>
     </div>
-    <RecentActivitySummary activities={activities} patientName={patient.name} patientUniqueId={patient.uniqueId} />
-    {pickerOpen && <div className="modal-backdrop" onMouseDown={() => setPickerOpen(false)}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" onClick={() => { onUpdateVisibility(patient.id, 'Selected Doctors', selectedDoctors); setPickerOpen(false) }}>Confirm selection</button></div></section></div>}
+    <RecentActivitySummary patientId={patient.id} patientName={patient.name} />
+    {pickerOpen && <div className="modal-backdrop" onMouseDown={() => { if (!visibilitySaving) setPickerOpen(false) }}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" disabled={visibilitySaving} onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" disabled={visibilitySaving} onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" disabled={visibilitySaving} onClick={() => void saveVisibility('Selected Doctors', selectedDoctors)}>{visibilitySaving ? 'Saving...' : 'Confirm selection'}</button></div></section></div>}
   </section>
 }
 
@@ -394,11 +583,24 @@ function AddPatientModal({ onNew, onExisting, onClose, patients }: { onNew: (nam
   const [uniqueId, setUniqueId] = useState('')
   const [query, setQuery] = useState('')
   const [confirm, setConfirm] = useState<Patient | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
   const results = patients.filter((p) => !p.active && p.name.toLowerCase().includes(query.trim().toLowerCase()))
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (mode === 'new') onNew(name, email);
-    else onExisting(uniqueId);
+    if (mode === 'new') {
+      setSubmitting(true)
+      setError('')
+      try {
+        await onNew(name, email)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not create the patient account.')
+      } finally {
+        setSubmitting(false)
+      }
+    } else {
+      onExisting(uniqueId)
+    }
   };
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={submit}><div className="modal-heading"><div><h2>Add patient</h2><p>Start monitoring a new patient or reactivate an existing account.</p></div><button type="button" onClick={onClose}>×</button></div><div className="registry-tabs add-tabs"><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => setMode('new')}>Add New Patient</button><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>Add Existing Patient</button></div>
     {mode === 'new' ? <div className="form-grid single"><label>Name<input required value={name} onChange={(event) => setName(event.target.value)} /></label><label>Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label></div> : <div className="form-grid single">
@@ -420,7 +622,7 @@ function AddPatientModal({ onNew, onExisting, onClose, patients }: { onNew: (nam
         <dl className="confirmation-details"><div><dt>Patient name</dt><dd>{confirm.name}</dd></div><div><dt>Unique ID</dt><dd>{confirm.uniqueId}</dd></div></dl>
         <div className="confirm-actions"><button type="button" onClick={() => setConfirm(null)}>Cancel</button><button type="button" className="primary" onClick={() => { setName(confirm.name); setUniqueId(confirm.uniqueId); setConfirm(null); }}>Confirm Reactivation</button></div>
       </div>}
-    </div>}<div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit">{mode === 'new' ? 'Add Patient' : 'Reactivate Monitoring'}</button></div></form></div>
+    </div>}{error && <div className="inline-note error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" onClick={onClose} disabled={submitting}>Cancel</button><button className="primary" type="submit" disabled={submitting}>{submitting ? 'Creating account…' : mode === 'new' ? 'Add Patient' : 'Reactivate Monitoring'}</button></div></form></div>
 }
 function PatientForm({ patient, nextId, onSave, onClose }: { patient: Patient | null; nextId: number; onSave: (p: Patient, isNew: boolean) => void; onClose: () => void }) {
   const isNew = patient === null
@@ -436,6 +638,11 @@ function PatientForm({ patient, nextId, onSave, onClose }: { patient: Patient | 
   const submit = (e: React.FormEvent) => { e.preventDefault(); const birth = new Date(dob); const age = dob ? new Date().getFullYear() - birth.getFullYear() : 0; const initials = name.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'NP'; onSave({ id: patient?.id ?? nextId, name: name || 'New patient', initials, age, residence: residence || 'Not specified', care: care || 'General lifestyle care', phone: patient?.phone ?? '+63 917 000 0000', email: patient?.email ?? 'patient@email.com', detail: 'Newly added patient', status: 'On track', priority, type, color: patient?.color ?? '#b8d5c9', assignedSince: assigned, followUpDate: patient?.followUpDate ?? '2026-08-30', uniqueId: patient?.uniqueId ?? `VS-${String(nextId).padStart(4, '0')}`, active: patient?.active ?? true, managingDoctor: patient?.managingDoctor ?? undefined, visibility }, isNew) }
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal patient-form" onSubmit={submit} onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><h2>{isNew ? 'Add patient' : 'Edit patient profile'}</h2><p>{isNew ? 'Create a patient profile for monitoring.' : 'Update the patient’s monitoring information.'}</p></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label>Full name<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maria Santos" /></label><label>Date of birth<input required type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></label><label>Residence<input required value={residence} onChange={(e) => setResidence(e.target.value)} placeholder="Barangay, Davao City" /></label><label>Patient problem / care focus<input required value={care} onChange={(e) => setCare(e.target.value)} placeholder="e.g. Post-op recovery" /></label><label>Patient type<select value={type} onChange={(e) => setType(e.target.value as Patient['type'])}><option>Out-patient</option><option>In-patient</option></select></label><label>Priority level<select value={priority} onChange={(e) => setPriority(e.target.value as Patient['priority'])}><option>High</option><option>Medium</option><option>Low</option></select></label><label>Assignment date<input type="date" value={assigned} onChange={(e) => setAssigned(e.target.value)} /></label></div><div className="form-footer"><span>Age will be calculated from date of birth.</span><button className="primary" type="submit">{isNew ? 'Add patient' : 'Save changes'}</button></div></form></div>
 }
+function formatConversationTime(value: string) {
+  const timestamp = new Date(value)
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 function MessagesView({ patients, selected, onSelect }: { patients: Patient[]; selected: Patient; onSelect: (id: number) => void }) {
   const [draft, setDraft] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -444,31 +651,46 @@ function MessagesView({ patients, selected, onSelect }: { patients: Patient[]; s
   const [notificationPreference, setNotificationPreference] = useState('All messages')
   const [patientInfoOpen, setPatientInfoOpen] = useState(false)
   const [importantNext, setImportantNext] = useState(false)
-  const [messages, setMessages] = useState<Record<number, { text: string; side: 'doctor' | 'patient'; time: string; important?: boolean }[]>>({ 
-    1: [{ text: 'Good morning, Maria. How are you feeling today?', side: 'doctor', time: '9:02 AM', important: true }, { text: 'Good morning, Doctor. I am feeling better, but I was unable to sleep well last night.', side: 'patient', time: '9:08 AM', important: false }, { text: 'Thank you for letting me know. Please try to complete your sleep log when you can.', side: 'doctor', time: '9:10 AM', important: false }], 
-    2: [{ text: 'I have submitted my breakfast and walk today.', side: 'patient', time: '8:14 AM', important: false }, { text: 'Great work, John. Keep it up.', side: 'doctor', time: '8:20 AM', important: true }], 
-    3: [{ text: 'My activity has been lower this week.', side: 'patient', time: 'Yesterday', important: false }, { text: 'Thank you for sharing. Let us review this during your check-in.', side: 'doctor', time: 'Yesterday', important: true }], 
-    4: [{ text: 'I completed my sleep log this morning.', side: 'patient', time: '7:42 AM', important: true }], 
-    5: [{ text: 'Nice walk today, Bianca!', side: 'doctor', time: '7:25 AM', important: false }] 
-  })
+  const [messages, setMessages] = useState<Record<number, PatientConversationMessage[]>>({})
+  const [messagesLoading, setMessagesLoading] = useState(true)
+  const [messagesError, setMessagesError] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setMessagesLoading(true)
+    setMessagesError('')
+    api.getPatientMessages(selected.id)
+      .then(({ messages: thread }) => { if (active) setMessages((current) => ({ ...current, [selected.id]: thread })); })
+      .catch((error) => { if (active) setMessagesError(error instanceof Error ? error.message : 'Could not load messages.'); })
+      .finally(() => { if (active) setMessagesLoading(false); })
+    return () => { active = false }
+  }, [selected.id])
+
   const current = messages[selected.id] ?? []
   const filteredMessages = notificationPreference === 'Important only' ? current.filter((message) => message.important) : notificationPreference === 'Muted' ? current.filter((message) => !message.important) : current
-  const send = () => {
-    if (!draft.trim()) return
-    const nextMessage = { text: draft.trim(), side: 'doctor' as const, time: 'Just now', important: importantNext }
-    setMessages((all) => {
-      const thread = all[selected.id] ?? []
-      return { ...all, [selected.id]: [...thread, nextMessage] }
-    })
-    setDraft('')
-    setImportantNext(false)
+  const send = async () => {
+    const text = draft.trim()
+    if (!text || sending) return
+    setSending(true)
+    setMessagesError('')
+    try {
+      const { message } = await api.sendPatientMessage(selected.id, text, importantNext)
+      setMessages((all) => ({ ...all, [selected.id]: [...(all[selected.id] ?? []), message] }))
+      setDraft('')
+      setImportantNext(false)
+    } catch (error) {
+      setMessagesError(error instanceof Error ? error.message : 'Could not send message.')
+    } finally {
+      setSending(false)
+    }
   }
   return <>
     <header className="patients-header"><div><p className="eyebrow">SECURE COMMUNICATION</p><h1>Messages</h1><p className="header-copy">Private conversations between you and your assigned patients.</p></div></header>
     <div className="messages-layout">
-      <aside className="message-directory"><div className="directory-heading"><strong>Conversations</strong><span>{patients.length}</span></div><div className="directory-list">{patients.map((p) => <button key={p.id} className={selected.id === p.id ? 'directory-item selected' : 'directory-item'} onClick={() => onSelect(p.id)}><span className="avatar" style={{ background: p.color }}>{p.initials}</span><span><strong>{p.name}</strong><small>{p.id === 1 ? 'Sleep log follow-up' : p.id === 2 ? 'Great work, John...' : p.id === 3 ? 'Activity has been lower...' : p.id === 4 ? 'Sleep log submitted' : 'Nice walk today!'}</small></span>{p.id === 1 && <i className="unread-dot" />}</button>)}</div></aside>
+      <aside className="message-directory"><div className="directory-heading"><strong>Conversations</strong><span>{patients.length}</span></div><div className="directory-list">{patients.map((p) => { const latest = messages[p.id]?.at(-1); return <button key={p.id} className={selected.id === p.id ? 'directory-item selected' : 'directory-item'} onClick={() => onSelect(p.id)}><span className="avatar" style={{ background: p.color }}>{p.initials}</span><span><strong>{p.name}</strong><small>{latest?.text || 'No messages yet'}</small></span></button> })}</div></aside>
       <section className="chat-panel"><header className="chat-header"><span className="avatar" style={{ background: selected.color }}>{selected.initials}</span><div><h2>{selected.name}</h2><p><i className="online-dot" />Active today</p></div><div className="conversation-menu-wrap"><button type="button" aria-label="Conversation settings" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>•••</button>{menuOpen && <div className="conversation-menu"><button type="button" onClick={() => { setPinned(!pinned); setConversationStatus(pinned ? 'Conversation unpinned.' : 'Conversation pinned for quick access.'); setMenuOpen(false) }}>{pinned ? 'Unpin conversation' : 'Pin conversation'}</button><label className="notification-choice">Notifications<select aria-label="Notification preference" value={notificationPreference} onChange={(event) => { const value = event.target.value; setNotificationPreference(value); setConversationStatus(value === 'Important only' ? 'Showing only important messages.' : value === 'Muted' ? 'Showing non-priority messages.' : 'Showing all messages in this conversation.') }}><option>All messages</option><option>Important only</option><option>Muted</option></select></label><button type="button" onClick={() => { setPatientInfoOpen(true); setMenuOpen(false) }}>View patient information</button></div>}</div></header>
-        <div className="chat-notice">{conversationStatus}</div><div className="messages">{filteredMessages.map((message, index) => <div className={`bubble-row ${message.side}`} key={`${message.time}-${index}`}><div className={`bubble ${message.important ? 'important' : ''}`} title={message.important ? 'Important message' : undefined} tabIndex={message.important ? 0 : undefined}>{message.text}<small>{message.time}</small></div></div>)}</div><div className="message-compose"><button type="button" className={importantNext ? 'important-toggle active' : 'important-toggle'} onClick={() => setImportantNext((value) => !value)}>Important</button><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder={`Message ${selected.name.split(' ')[0]}...`} /><button type="button" onClick={send}>Send ↑</button></div>
+        <div className="chat-notice">{conversationStatus}</div>{messagesLoading && <p className="muted">Loading messages...</p>}{messagesError && <p className="inline-note error" role="alert">{messagesError}</p>}<div className="messages">{filteredMessages.map((message) => <div className={`bubble-row ${message.sender}`} key={message.id}><div className={`bubble ${message.important ? 'important' : ''}`} title={message.important ? 'Important message' : undefined} tabIndex={message.important ? 0 : undefined}>{message.text}<small>{formatConversationTime(message.time)}</small></div></div>)}</div><div className="message-compose"><button type="button" className={importantNext ? 'important-toggle active' : 'important-toggle'} onClick={() => setImportantNext((value) => !value)}>Important</button><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void send()} placeholder={`Message ${selected.name.split(' ')[0]}...`} /><button type="button" disabled={sending || !draft.trim()} onClick={() => void send()}>{sending ? 'Sending...' : 'Send ↑'}</button></div>
       </section>
     </div>
     {patientInfoOpen && <div className="modal-backdrop" onMouseDown={() => setPatientInfoOpen(false)}><section className="modal contact-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>{selected.name}</h2><p>Patient contact information</p></div><button type="button" onClick={() => setPatientInfoOpen(false)}>×</button></div><dl className="confirmation-details"><div><dt>Unique ID</dt><dd>{selected.uniqueId || 'Not available'}</dd></div><div><dt>Email</dt><dd>{selected.email || 'Not available'}</dd></div><div><dt>Phone</dt><dd>{selected.phone || 'Not available'}</dd></div><div><dt>Care focus</dt><dd>{selected.care}</dd></div></dl></section></div>}
@@ -522,4 +744,60 @@ function PanelTitle({ title, subtitle, action, onAction }: { title: string; subt
 function RangeSelect({ value, setValue }: { value: Range; setValue: (x: Range) => void }) { return <select className="period" value={value} onChange={(e) => setValue(e.target.value as Range)}>{(['Today', 'Past 3 days', 'Past week', 'Past month'] as Range[]).map((item) => <option key={item}>{item}</option>)}</select> }
 function PatientRow({ patient, onClick }: { patient: Patient; onClick: () => void }) { return <button className="patient-row" onClick={onClick}><span className="avatar" style={{ background: patient.color }}>{patient.initials}</span><span className="patient-info"><strong>{patient.name}</strong><small>{patient.detail}</small></span><span className={`status ${patient.status.replaceAll(' ', '-').toLowerCase()}`}>{patient.status}</span><span className="chevron">›</span></button> }
 function Activity({ item }: { item: string[] }) { return <div className="activity"><span className={`activity-icon ${item[4]}`}>{item[3]}</span><p><b>{item[0]}</b> {item[1]} <small>{item[2]}</small></p></div> }
+
+// 5. Standalone React Component
+function NotesWidget({
+  currentNote,
+  notes,
+  onNoteChange,
+  onAdd,
+  onDelete
+}: {
+  currentNote: string
+  notes: string[]
+  onNoteChange: (val: string) => void
+  onAdd: () => void
+  onDelete: (index: number) => void
+}) {
+  return (
+    <div style={{ padding: '1.5rem', background: '#fff', borderRadius: '8px' }}>
+      <h2>Doctor Reminders & Notes</h2>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <input
+          type="text"
+          value={currentNote}
+          onChange={(e) => onNoteChange(e.target.value)}
+          placeholder="Type a clinical note or reminder..."
+          style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc' }}
+        />
+        <button onClick={onAdd} style={{ padding: '0.5rem 1rem', cursor: 'pointer' }}>
+          Add Note
+        </button>
+      </div>
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {notes.length === 0 ? (
+          <p style={{ color: '#888' }}>No notes saved yet.</p>
+        ) : (
+          notes.map((note, index) => (
+            <li
+              key={index}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '0.5rem 0',
+                borderBottom: '1px solid #eee'
+              }}
+            >
+              <span>{note}</span>
+              <button onClick={() => onDelete(index)} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>
+                Remove
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+    </div>
+  )
+}
+
 export default App

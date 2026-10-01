@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getLogs } from '../lib/storage';
+import { patientApi, type PatientLog } from '../lib/api';
 
-type Log = any;
+type Log = PatientLog;
 
 const ranges = ['Last 3 Days', 'Last 7 Days', 'Last 14 Days', 'Last 30 Days', 'Custom'] as const;
 
@@ -24,9 +24,14 @@ export default function SummaryPage() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    setLogs(getLogs());
+    let active = true;
+    patientApi.getLogs()
+      .then(({ logs: patientLogs }) => { if (active) setLogs(patientLogs); })
+      .catch((error) => { if (active) setLoadError(error instanceof Error ? error.message : 'Could not load health logs.'); });
+    return () => { active = false; };
   }, []);
 
   const filtered = useMemo(() => {
@@ -87,6 +92,7 @@ export default function SummaryPage() {
   return (
     <section className="summary-page">
       <div className="section-header summary-heading"><div><p className="eyebrow">Summary</p><h2>Your recent activity</h2><p>See the patterns behind the small choices you are making.</p></div><span className="status-chip">{filtered.length} entries</span></div>
+      {loadError && <p className="login-error" role="alert">{loadError}</p>}
 
       <div className="timeframe-select">
         <label>Timeframe<select value={range} onChange={e => setRange(e.target.value as any)}>{ranges.map(r => <option key={r}>{r}</option>)}</select></label>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const { onLogout } = useOutletContext<{ onLogout: () => void }>();
   const [dailyReminder, setDailyReminder] = useState(true);
   const [messageAlerts, setMessageAlerts] = useState(true);
@@ -59,7 +60,7 @@ export function SettingsPage() {
 
       <div className="settings-section">
         <h3>Account</h3>
-        <div className="settings-row"><div><span>Change Password</span><small className="setting-help">Password management is available in the connected account service.</small></div><button className="secondary-button" type="button">Change Password</button></div>
+        <div className="settings-row"><div><span>Change Password</span><small className="setting-help">Update your account password.</small></div><button className="secondary-button" type="button" onClick={() => navigate('/change-password')}>Change Password</button></div>
         <div className="settings-row"><div><span>Sign out</span></div><button className="danger-button" type="button" onClick={onLogout}>Sign out</button></div>
       </div>
     </section>

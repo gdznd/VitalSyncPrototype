@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { api, clearAuthToken, type AuthUser } from '../lib/api'
 
 type AuthView = 'login' | 'register' | 'forgot'
 
-export function LoginPage({ onLogin, onCreateDoctor }: { onLogin: (email: string, password: string) => boolean; onCreateDoctor: (account: { name: string; email: string; password: string; specialty: string }) => boolean }) {
+export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [view, setView] = useState<AuthView>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -12,38 +13,39 @@ export function LoginPage({ onLogin, onCreateDoctor }: { onLogin: (email: string
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const submitLogin = (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!email.trim() || !password) {
-      setError('Email and password are required.')
-      return
+  const submitLogin = async (event: React.FormEvent) => {
+      event.preventDefault()
+      if (!email.trim() || !password) {
+        setError('Email and password are required.')
+        return
+      }
+    try {
+      const response = await api.login(email, password)
+      if (response.user.role !== 'doctor') {
+        clearAuthToken()
+        setError('This account is not a doctor account.')
+        return
+      }
+      onLogin(response.user)
+      setError('')
+    } catch (err: any) {
+        setError(err.message || 'No matching doctor account was found. Try a registered clinic email and password.')
+      }
     }
-    const ok = onLogin(email, password)
-    if (!ok) {
-      setError('No matching doctor account was found. Try a registered clinic email and password.')
-      return
-    }
-    setError('')
-  }
 
-  const submitRegister = (event: React.FormEvent) => {
+  const submitRegister = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!fullName.trim() || !email.trim() || !password) {
       setError('Name, email, and password are required.')
       return
     }
-    const created = onCreateDoctor({ name: fullName, email, password, specialty })
-    if (!created) {
-      setError('An account already exists for that doctor email.')
-      return
+    try {
+      const response = await api.registerDoctor({ name: fullName, email, password, specialty })
+      onLogin(response.user)
+      setError('')
+    } catch (err: any) {
+      setError(err.message || 'An account already exists for that doctor email.')
     }
-    setError('')
-    setSuccess('Doctor account created. You can now sign in with your new credentials.')
-    setView('login')
-    setFullName('')
-    setEmail('')
-    setPassword('')
-    setSpecialty('Lifestyle Medicine')
   }
 
   const submitRecovery = (event: React.FormEvent) => {

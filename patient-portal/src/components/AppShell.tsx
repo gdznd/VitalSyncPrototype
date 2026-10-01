@@ -9,7 +9,7 @@ const links = [
   { to: '/settings', label: 'Settings' },
 ];
 
-export function AppShell({ onLogout }: { onLogout: () => void }) {
+export function AppShell({ onLogout, patientName }: { onLogout: () => void; patientName: string }) {
   return (
     <div className="app-shell">
       <header className="app-topbar">
@@ -23,7 +23,7 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
       </header>
 
       <main className="app-main">
-        <Outlet context={{ onLogout }} />
+        <Outlet context={{ onLogout, patientName }} />
       </main>
 
       <nav className="bottom-nav" aria-label="Primary navigation">

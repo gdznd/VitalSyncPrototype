@@ -1,0 +1,33 @@
+from django.contrib import admin
+from django.urls import path
+
+from api.patients import archive_patient, doctor_directory, patient_detail, patient_list, reactivate_patient, update_patient_follow_up, update_patient_visibility
+from api.logs import lifestyle_logs
+from api.goals import doctor_provider_goals, patient_provider_goals
+from api.personal_goals import personal_goal_detail, personal_goals
+from api.messaging import doctor_patient_conversation, patient_conversation, patient_provider_directory
+from api.views import change_password, current_user, health_check, login, register_doctor
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("api/health", health_check, name="health-check"),
+    path("api/auth/login", login, name="login"),
+    path("api/auth/register-doctor", register_doctor, name="register-doctor"),
+    path("api/auth/me", current_user, name="current-user"),
+    path("api/auth/change-password", change_password, name="change-password"),
+    path("api/patients", patient_list, name="patient-list"),
+    path("api/patients/reactivate", reactivate_patient, name="patient-reactivate"),
+    path("api/doctors", doctor_directory, name="doctor-directory"),
+    path("api/patients/<int:patient_id>", patient_detail, name="patient-detail"),
+    path("api/patients/<int:patient_id>/follow-up", update_patient_follow_up, name="patient-follow-up"),
+    path("api/patients/<int:patient_id>/archive", archive_patient, name="patient-archive"),
+    path("api/patients/<int:patient_id>/visibility", update_patient_visibility, name="patient-visibility"),
+    path("api/logs", lifestyle_logs, name="lifestyle-logs"),
+    path("api/patients/<int:patient_id>/provider-goals", doctor_provider_goals, name="doctor-provider-goals"),
+    path("api/provider-goals", patient_provider_goals, name="patient-provider-goals"),
+    path("api/personal-goals", personal_goals, name="personal-goals"),
+    path("api/personal-goals/<int:goal_id>", personal_goal_detail, name="personal-goal-detail"),
+    path("api/providers", patient_provider_directory, name="patient-provider-directory"),
+    path("api/messages/<int:doctor_id>", patient_conversation, name="patient-conversation"),
+    path("api/patients/<int:patient_id>/messages", doctor_patient_conversation, name="doctor-patient-conversation"),
+]

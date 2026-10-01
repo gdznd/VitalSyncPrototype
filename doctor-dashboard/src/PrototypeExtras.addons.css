@@ -30,6 +30,7 @@
 .selected-doctors-summary button{padding:6px 8px;border:1px solid var(--line);border-radius:6px;color:var(--teal);background:var(--bg-panel);font-size:10px;font-weight:700;white-space:nowrap}
 .doctor-picker-modal{width:min(460px,calc(100vw - 40px))}
 .doctor-picker-modal .doctor-picker{margin-top:20px}
+.doctor-picker-modal .doctor-picker .search-options{position:static;max-height:180px;margin-top:6px}
 .conversation-menu-wrap{position:relative;margin-left:auto}
 .conversation-menu-wrap>button{margin-left:0}
 .conversation-menu{position:absolute;z-index:5;top:calc(100% + 8px);right:0;min-width:170px;padding:5px;border:1px solid var(--line);border-radius:8px;background:var(--bg-panel);box-shadow:0 10px 25px #1e364722}

@@ -1,39 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getProviderGoals, saveProviderGoals, getGoals, saveGoals, getCurrentPatientId, getLogs } from '../lib/storage';
-import { evaluateGoal, EvaluationType, GoalFrequency } from '../lib/goalEvaluator';
+import { patientApi, type PatientLog, type PersonalGoalDto, type ProviderGoal } from '../lib/api';
+import { evaluateGoal, GoalFrequency } from '../lib/goalEvaluator';
 
-export type ProviderGoal = {
-  id: number;
-  patientUniqueId: string;
-  title: string;
-  category: string;
-  target: string;
-  frequency: GoalFrequency;
-  startDate: string;
-  reviewDate: string;
-  instructions: string;
-  status: 'Active' | 'Paused' | 'Completed' | 'Cancelled';
-  progressPercent: number;
-  assignedBy: string;
-  evaluationType?: EvaluationType;
-  targetValue?: number;
-  targetUnit?: string;
-  metricKey?: string;
-};
-
-export type PersonalGoal = {
-  id: number;
-  patientUniqueId?: string;
-  title: string;
-  category: string;
-  target: string;
-  frequency: GoalFrequency;
-  startDate: string;
-  reviewDate: string;
-  instructions: string;
-  status: 'Active' | 'Paused' | 'Completed' | 'Cancelled';
-  progressPercent: number;
-};
+type PersonalGoal = PersonalGoalDto;
 
 const goalTemplates = [
   { id: 'eat-veg', title: 'Eat more vegetables', category: 'Nutrition', target: '5 servings', frequency: 'Daily' as GoalFrequency },
@@ -45,85 +14,14 @@ const goalTemplates = [
   { id: 'custom', title: 'Build My Own Goal', category: 'Other', target: '', frequency: 'Daily' as GoalFrequency },
 ];
 
-const defaultProviderGoals: ProviderGoal[] = [
-  { 
-    id: 1, 
-    patientUniqueId: 'VS-0002', 
-    title: 'Eat more vegetables', 
-    category: 'Nutrition', 
-    target: '5 servings', 
-    frequency: 'Daily', 
-    startDate: '2026-08-20', 
-    reviewDate: '2026-10-15', 
-    instructions: 'Include vegetables at most meals to reach 5 servings per day.', 
-    status: 'Active', 
-    progressPercent: 35, 
-    assignedBy: 'Dr. Rafael Lopez',
-    evaluationType: 'indicator',
-    targetValue: 1,
-    targetUnit: 'servings',
-    metricKey: 'food'
-  },
-  { 
-    id: 2, 
-    patientUniqueId: 'VS-0002', 
-    title: 'Walk every day', 
-    category: 'Physical Activity', 
-    target: '30 minutes', 
-    frequency: 'Daily', 
-    startDate: '2026-08-20', 
-    reviewDate: '2026-09-30', 
-    instructions: 'Aim for at least 30 minutes of walking each day.', 
-    status: 'Active', 
-    progressPercent: 50, 
-    assignedBy: 'Dr. Jamie Dizon',
-    evaluationType: 'duration',
-    targetValue: 30,
-    targetUnit: 'minutes',
-    metricKey: 'activity'
-  },
-  { 
-    id: 3, 
-    patientUniqueId: 'VS-0002', 
-    title: 'Improve sleep schedule', 
-    category: 'Sleep', 
-    target: '7 hours', 
-    frequency: 'Daily', 
-    startDate: '2026-08-20', 
-    reviewDate: '2026-11-01', 
-    instructions: 'Target consistent bed and wake times to improve sleep quality.', 
-    status: 'Active', 
-    progressPercent: 20, 
-    assignedBy: 'Dr. Ana Cruz',
-    evaluationType: 'duration',
-    targetValue: 7,
-    targetUnit: 'hours',
-    metricKey: 'sleep'
-  }
-];
-
-const defaultPersonalGoals: PersonalGoal[] = [
-  { id: 101, patientUniqueId: 'VS-0002', title: 'Drink 8 glasses of water', category: 'Nutrition', target: '8 glasses', frequency: 'Daily', startDate: '2026-08-25', reviewDate: '2026-09-25', instructions: 'Keep a water bottle on my desk.', status: 'Active', progressPercent: 60 }
-];
-
 export function GoalsPage() {
-  const currentPatientId = getCurrentPatientId();
-  const logs = getLogs();
-
-  const [providerGoals, setProviderGoals] = useState<ProviderGoal[]>(() => {
-    const stored = getProviderGoals();
-    const hasPatientGoals = stored.some((pg: ProviderGoal) => pg.patientUniqueId === currentPatientId);
-    if (!hasPatientGoals) {
-      const seeded = defaultProviderGoals.map(pg => ({ ...pg, patientUniqueId: currentPatientId }));
-      return [...stored, ...seeded];
-    }
-    return stored;
-  });
-
-  const [personalGoals, setPersonalGoals] = useState<PersonalGoal[]>(() => {
-    const stored = getGoals();
-    return stored.length ? stored : defaultPersonalGoals.map(g => ({ ...g, patientUniqueId: currentPatientId }));
-  });
+  const [providerGoals, setProviderGoals] = useState<ProviderGoal[]>([]);
+  const [logs, setLogs] = useState<PatientLog[]>([]);
+  const [personalGoals, setPersonalGoals] = useState<PersonalGoal[]>([]);
+  const [providerGoalsLoading, setProviderGoalsLoading] = useState(true);
+  const [personalGoalsLoading, setPersonalGoalsLoading] = useState(true);
+  const [providerGoalsError, setProviderGoalsError] = useState('');
+  const [personalGoalsError, setPersonalGoalsError] = useState('');
 
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<typeof goalTemplates[number] | null>(null);
@@ -131,38 +29,62 @@ export function GoalsPage() {
   const [detailsGoal, setDetailsGoal] = useState<any | null>(null);
 
   useEffect(() => {
-    saveProviderGoals(providerGoals);
-  }, [providerGoals]);
+    let active = true;
+    Promise.all([patientApi.getProviderGoals(), patientApi.getLogs()])
+      .then(([providerResponse, logResponse]) => {
+        if (!active) return;
+        setProviderGoals(providerResponse.goals);
+        setLogs(logResponse.logs);
+      })
+      .catch((error) => {
+        if (active) setProviderGoalsError(error instanceof Error ? error.message : 'Could not load goals.');
+      })
+      .finally(() => { if (active) setProviderGoalsLoading(false); });
+    patientApi.getPersonalGoals()
+      .then(({ goals }) => { if (active) setPersonalGoals(goals); })
+      .catch((error) => { if (active) setPersonalGoalsError(error instanceof Error ? error.message : 'Could not load personal goals.'); })
+      .finally(() => { if (active) setPersonalGoalsLoading(false); });
+    return () => { active = false; };
+  }, []);
 
-  useEffect(() => {
-    saveGoals(personalGoals);
-  }, [personalGoals]);
-
-  const activeProviderGoals = providerGoals.filter(
-    (pg) => pg.patientUniqueId === currentPatientId && pg.status !== 'Cancelled'
-  );
+  const activeProviderGoals = providerGoals.filter((pg) => pg.status !== 'Cancelled');
 
   const activePersonalGoals = personalGoals.filter(
     (g) => g.status !== 'Cancelled'
   );
 
-  const handleSavePersonalGoal = (goalData: PersonalGoal) => {
-    const stamped = { ...goalData, patientUniqueId: currentPatientId };
-    if (editingGoal) {
-      setPersonalGoals(prev => prev.map(g => g.id === stamped.id ? stamped : g));
-    } else {
-      setPersonalGoals(prev => [stamped, ...prev]);
+  const handleSavePersonalGoal = async (goalData: PersonalGoal) => {
+    setPersonalGoalsError('');
+    try {
+      const response = editingGoal
+        ? await patientApi.updatePersonalGoal(editingGoal.id, goalData)
+        : await patientApi.createPersonalGoal(goalData);
+      setPersonalGoals((current) => editingGoal
+        ? current.map((goal) => goal.id === response.goal.id ? response.goal : goal)
+        : [response.goal, ...current]);
+      setSelectedTemplate(null);
+      setEditingGoal(null);
+    } catch (error) {
+      setPersonalGoalsError(error instanceof Error ? error.message : 'Could not save your personal goal.');
     }
-    setSelectedTemplate(null);
-    setEditingGoal(null);
   };
 
-  const cancelPersonalGoal = (id: number) => {
-    setPersonalGoals(prev => prev.map(g => g.id === id ? { ...g, status: 'Cancelled' } : g));
+  const cancelPersonalGoal = async (id: number) => {
+    try {
+      const { goal } = await patientApi.updatePersonalGoal(id, { status: 'Cancelled' });
+      setPersonalGoals((current) => current.map((item) => item.id === id ? goal : item));
+    } catch (error) {
+      setPersonalGoalsError(error instanceof Error ? error.message : 'Could not cancel your personal goal.');
+    }
   };
 
-  const updatePersonalGoalStatus = (id: number, status: PersonalGoal['status']) => {
-    setPersonalGoals(prev => prev.map(g => g.id === id ? { ...g, status } : g));
+  const updatePersonalGoalStatus = async (id: number, status: PersonalGoal['status']) => {
+    try {
+      const { goal } = await patientApi.updatePersonalGoal(id, { status });
+      setPersonalGoals((current) => current.map((item) => item.id === id ? goal : item));
+    } catch (error) {
+      setPersonalGoalsError(error instanceof Error ? error.message : 'Could not update your personal goal.');
+    }
   };
 
   return (
@@ -184,7 +106,10 @@ export function GoalsPage() {
         </div>
       </div>
 
-      {activeProviderGoals.length === 0 ? (
+      {providerGoalsError && <p className="login-error" role="alert">{providerGoalsError}</p>}
+      {providerGoalsLoading ? (
+        <div className="goals-empty"><p>Loading assigned goals...</p></div>
+      ) : activeProviderGoals.length === 0 ? (
         <div className="goals-empty">
           <div className="select-icon">✦</div>
           <p style={{ fontWeight: 700, color: 'var(--text-ink)', fontSize: '14px', margin: '0 0 4px' }}>No assigned goals yet.</p>
@@ -193,9 +118,7 @@ export function GoalsPage() {
       ) : (
         <div className="goals-grid">
           {activeProviderGoals.map((pg) => {
-            const evaluation = evaluateGoal(pg, logs);
-            const displayPercentage = evaluation.evaluable ? evaluation.percentage : pg.progressPercent;
-            const displayProgressText = evaluation.evaluable ? evaluation.progressText : `${pg.progressPercent}% complete`;
+            const evaluation = evaluateGoal({ ...pg, targetValue: pg.targetValue ?? undefined }, logs);
             return (
               <div key={pg.id} className="goal-card provider">
                 <div className="goal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
@@ -209,11 +132,8 @@ export function GoalsPage() {
                   <span><strong>Target:</strong> {pg.target || 'Not specified'}</span>
                   <span><strong>Frequency:</strong> {pg.frequency}</span>
                 </div>
-                <div className="progress-bar-bg" style={{ marginTop: '6px' }}>
-                  <div className="progress-bar-fill" style={{ width: `${displayPercentage}%` }} />
-                </div>
                 <div className="goal-footer-meta" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '4px', alignItems: 'center' }}>
-                  <span>{displayProgressText}</span>
+                  {evaluation.evaluable ? <><div className="progress-bar-bg" style={{ marginTop: '6px', flex: 1 }}><div className="progress-bar-fill" style={{ width: `${evaluation.percentage}%` }} /></div><span>{evaluation.progressText}</span></> : <span>Progress not automatically evaluated</span>}
                   <small className="assigned">Assigned by {pg.assignedBy}</small>
                 </div>
               </div>
@@ -237,7 +157,7 @@ export function GoalsPage() {
       {activePersonalGoals.length === 0 ? (
         <div className="goals-empty personal-empty">
           <div className="select-icon">🌱</div>
-          <p style={{ fontWeight: 700, color: 'var(--text-ink)', fontSize: '14px', margin: '0 0 4px' }}>No personal goals yet.</p>
+          {personalGoalsLoading ? <p>Loading your personal goals...</p> : <p style={{ fontWeight: 700, color: 'var(--text-ink)', fontSize: '14px', margin: '0 0 4px' }}>No personal goals yet.</p>}
           <p style={{ margin: '0 0 10px' }}>Create a personal lifestyle goal to keep yourself motivated and on track.</p>
           <button className="primary-button" onClick={() => { setEditingGoal(null); setTemplateModalOpen(true); }}>+ Create Personal Goal</button>
         </div>
@@ -271,6 +191,7 @@ export function GoalsPage() {
           ))}
         </div>
       )}
+      {personalGoalsError && <p className="login-error" role="alert">{personalGoalsError}</p>}
 
       {templateModalOpen && (
         <GoalTemplateModal
@@ -424,7 +345,9 @@ function GoalConfigurationModal({ template, goal, onClose, onSave }: { template:
 function GoalDetailsModal({ goal, onClose }: { goal: any; onClose: () => void }) {
   if (!goal) return null;
   const evaluation = goal.evaluation;
-  const progressStr = evaluation && evaluation.evaluable ? `${evaluation.progressText} (${evaluation.percentage}% complete)` : `${goal.progressPercent}% complete`;
+  const progressStr = evaluation
+    ? evaluation.evaluable ? `${evaluation.progressText} (${evaluation.percentage}% complete)` : 'Progress not automatically evaluated'
+    : `${goal.progressPercent}% complete`;
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <section className="health-modal goal-template-modal" onMouseDown={(event) => event.stopPropagation()}>

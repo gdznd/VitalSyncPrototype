@@ -1,7 +1,9 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { patientApi, type NewPatientLog, type PatientLog } from '../lib/api';
+import { useOutletContext } from 'react-router-dom';
 
 type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit';
-type HealthLog = { id: number; type: LogType; date: string; time: string; title: string; detail: string; extra?: string };
+type HealthLog = PatientLog;
 type Medication = { name: string; dosage: string; unit: string };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -10,10 +12,12 @@ const icons: Record<LogType, string> = { food: '🍽️', medication: '💊', ac
 const labels: Record<LogType, string> = { food: 'Food', medication: 'Medication', activity: 'Physical Activity', sleep: 'Sleep', stress: 'Stress', social: 'Social', habit: 'Lifestyle Habits' };
 const formatTime = (value: string) => new Date(`2000-01-01T${value}`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-import { getLogs, saveLogs } from '../lib/storage';
-
 export function HomePage() {
-  const [logs, setLogs] = useState<HealthLog[]>(() => getLogs());
+  const { patientName } = useOutletContext<{ patientName: string }>();
+  const firstName = patientName.trim().split(/\s+/)[0] || 'there';
+  const [logs, setLogs] = useState<HealthLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(true);
+  const [logError, setLogError] = useState('');
   const [chooserOpen, setChooserOpen] = useState(false);
   const [activeForm, setActiveForm] = useState<LogType | null>(null);
   const [customDialog, setCustomDialog] = useState(false);
@@ -24,6 +28,27 @@ export function HomePage() {
   const [stressOpen, setStressOpen] = useState(false);
   const [socialOpen, setSocialOpen] = useState(false);
   const [habitOpen, setHabitOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    patientApi.getLogs()
+      .then(({ logs: patientLogs }) => { if (active) setLogs(patientLogs); })
+      .catch((error) => { if (active) setLogError(error instanceof Error ? error.message : 'Could not load health logs.'); })
+      .finally(() => { if (active) setLogsLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const createLog = async (entry: NewPatientLog) => {
+    setLogError('');
+    try {
+      const response = await patientApi.createLog(entry);
+      setLogs(current => [...current, response.log]);
+      return true;
+    } catch (error) {
+      setLogError(error instanceof Error ? error.message : 'Could not save this health log.');
+      return false;
+    }
+  };
 
   const resetForm = () => setForm({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }], activity: activities[0], minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
   const openForm = (type: LogType) => { resetForm(); setChooserOpen(false); setActiveForm(type); };
@@ -37,13 +62,12 @@ export function HomePage() {
   const save = (event: FormEvent) => {
     event.preventDefault(); if (!activeForm) return;
     let title = ''; let detail = ''; let extra = '';
-    if (activeForm === 'food') { const foods = form.foods.filter(Boolean); title = form.meal; detail = foods.join(' · ') || 'Food entry'; extra = form.description; }
-    if (activeForm === 'medication') { const meds = form.medications.filter(m => m.name); title = 'Medication'; detail = meds.map(m => `${m.name}${m.dosage ? ` ${m.dosage} ${m.unit}` : ''}`).join(' · ') || 'Medication entry'; }
-    if (activeForm === 'activity') { title = form.activity; detail = `${form.minutes} minutes`; extra = form.calories ? `${form.calories} calories burned` : ''; }
-    if (activeForm === 'sleep') { title = 'Sleep'; detail = `${formatTime(form.sleepTime)} → ${formatTime(form.wakeTime)}`; extra = `${sleepDuration} · Sleep quality: ${form.sleepQuality}`; }
-    const entry = { id: Date.now(), type: activeForm, date: form.date, time: form.time, title, detail, extra } as HealthLog;
-    setLogs(current => { const next = [...current, entry]; saveLogs(next); return next; });
-    setActiveForm(null);
+    let payload: Record<string, unknown> = {};
+    if (activeForm === 'food') { const foods = form.foods.filter(Boolean); title = form.meal; detail = foods.join(' · ') || 'Food entry'; extra = form.description; payload = { mealType: form.meal, foodItems: foods, description: form.description }; }
+    if (activeForm === 'medication') { const meds = form.medications.filter(m => m.name); title = 'Medication'; detail = meds.map(m => `${m.name}${m.dosage ? ` ${m.dosage} ${m.unit}` : ''}`).join(' · ') || 'Medication entry'; payload = { medications: meds }; }
+    if (activeForm === 'activity') { title = form.activity; detail = `${form.minutes} minutes`; extra = form.calories ? `${form.calories} calories burned` : ''; payload = { activity: form.activity, minutes: Number(form.minutes), calories: form.calories ? Number(form.calories) : null }; }
+    if (activeForm === 'sleep') { title = 'Sleep'; detail = `${formatTime(form.sleepTime)} → ${formatTime(form.wakeTime)}`; extra = `${sleepDuration} · Sleep quality: ${form.sleepQuality}`; payload = { sleepTime: form.sleepTime, wakeTime: form.wakeTime, duration: sleepDuration, quality: form.sleepQuality }; }
+    void createLog({ type: activeForm, date: form.date, time: form.time, title, detail, extra, payload }).then(saved => { if (saved) setActiveForm(null); });
   };
   const set = (key: string, value: string) => setForm(current => ({ ...current, [key]: value }));
   const addCustomActivity = () => { const name = customActivity.trim(); if (name) { setActivities(current => [...current, name]); setForm(current => ({ ...current, activity: name })); } setCustomActivity(''); setCustomDialog(false); };
@@ -83,10 +107,11 @@ export function HomePage() {
   }, []);
 
   return <section className="health-home">
-    <div className="home-welcome"><div><p className="eyebrow">Your lifestyle medicine companion</p><h2>Good morning, John</h2><p>Small daily choices add up. How are you feeling today?</p></div><span className="status-chip">On your journey</span></div>
+    <div className="home-welcome"><div><p className="eyebrow">Your lifestyle medicine companion</p><h2>Good morning, {firstName}</h2><p>Small daily choices add up. How are you feeling today?</p></div><span className="status-chip">On your journey</span></div>
+    {logError && <p className="login-error" role="alert">{logError}</p>}
     <section className="health-log-card" aria-labelledby="health-logs-title">
       <div className="health-log-header"><div><p className="eyebrow">Daily record</p><h2 id="health-logs-title">Today’s Health Logs</h2></div><button className="add-log-button" onClick={() => setChooserOpen(true)} aria-label="Add a health log">+</button></div>
-      {todayLogs.length === 0 ? <div className="logs-empty"><span>✦</span><h3>No logs yet for today.</h3><p>Capture a meal, medication, movement, or sleep to keep your care team informed.</p><button className="text-button" onClick={() => setChooserOpen(true)}>Add your first log</button></div> : <div className="log-timeline">{todayLogs.map(log => <article className="log-entry" key={log.id}><time>{formatTime(log.time)}</time><div className="log-entry__icon">{icons[log.type]}</div><div><p className="log-entry__type">{labels[log.type]}</p><h3>{log.title}</h3><p>{log.detail}</p>{log.extra && <small>{log.extra}</small>}</div></article>)}</div>}
+      {logsLoading ? <div className="logs-empty"><h3>Loading health logs...</h3></div> : todayLogs.length === 0 ? <div className="logs-empty"><span>✦</span><h3>No logs yet for today.</h3><p>Capture a meal, medication, movement, or sleep to keep your care team informed.</p><button className="text-button" onClick={() => setChooserOpen(true)}>Add your first log</button></div> : <div className="log-timeline">{todayLogs.map(log => <article className="log-entry" key={log.id}><time>{formatTime(log.time)}</time><div className="log-entry__icon">{icons[log.type]}</div><div><p className="log-entry__type">{labels[log.type]}</p><h3>{log.title}</h3><p>{log.detail}</p>{log.extra && <small>{log.extra}</small>}</div></article>)}</div>}
     </section>
     <div className="lifestyle-tip"><span>✦</span><div><strong>Today’s gentle reminder</strong><p>{reminder}</p></div></div>
 
@@ -102,19 +127,19 @@ export function HomePage() {
     </Modal>}
 
     {/* Stress reflection modal */}
-    {stressOpen && <Modal title="Stress reflection" onClose={() => setStressOpen(false)}><StressModal onSave={(entry) => { const e = { id: Date.now(), type: 'stress' as LogType, date: entry.date || today(), time: entry.time || now(), title: entry.title || 'Stress reflection', detail: entry.detail || '', extra: entry.extra || '' }; setLogs(current => { const next = [...current, e]; saveLogs(next); return next; }); setStressOpen(false); }} onCancel={() => setStressOpen(false)} /></Modal>}
+    {stressOpen && <Modal title="Stress reflection" onClose={() => setStressOpen(false)}>{logError && <p className="login-error" role="alert">{logError}</p>}<StressModal onSave={async (entry) => { const saved = await createLog({ type: 'stress', date: entry.date || today(), time: entry.time || now(), title: entry.title || 'Stress reflection', detail: entry.detail || '', extra: entry.extra || '', payload: { reflection: entry.detail || '', notes: entry.extra || '' } }); if (saved) setStressOpen(false); }} onCancel={() => setStressOpen(false)} /></Modal>}
 
     {/* Social reflection modal */}
-    {socialOpen && <Modal title="Social reflection" onClose={() => setSocialOpen(false)}><SocialModal onSave={(entry) => { const e = { id: Date.now(), type: 'social' as LogType, date: entry.date || today(), time: entry.time || now(), title: entry.title || 'Social reflection', detail: entry.detail || '', extra: entry.extra || '' }; setLogs(current => { const next = [...current, e]; saveLogs(next); return next; }); setSocialOpen(false); }} onCancel={() => setSocialOpen(false)} /></Modal>}
+    {socialOpen && <Modal title="Social reflection" onClose={() => setSocialOpen(false)}>{logError && <p className="login-error" role="alert">{logError}</p>}<SocialModal onSave={async (entry) => { const saved = await createLog({ type: 'social', date: entry.date || today(), time: entry.time || now(), title: entry.title || 'Social reflection', detail: entry.detail || '', extra: entry.extra || '', payload: { reflection: entry.detail || '', notes: entry.extra || '' } }); if (saved) setSocialOpen(false); }} onCancel={() => setSocialOpen(false)} /></Modal>}
 
     {/* Lifestyle habits modal */}
-    {habitOpen && <Modal title="Lifestyle habits" onClose={() => setHabitOpen(false)}><LifestyleHabitsModal onSave={(entry) => { const e = { id: Date.now(), type: 'habit' as LogType, date: today(), time: now(), title: 'Lifestyle habits', detail: entry.detail || '', extra: entry.extra || '' }; setLogs(current => { const next = [...current, e]; saveLogs(next); return next; }); setHabitOpen(false); }} onCancel={() => setHabitOpen(false)} /></Modal>}
+    {habitOpen && <Modal title="Lifestyle habits" onClose={() => setHabitOpen(false)}>{logError && <p className="login-error" role="alert">{logError}</p>}<LifestyleHabitsModal onSave={async (entry) => { const saved = await createLog({ type: 'habit', date: today(), time: now(), title: 'Lifestyle habits', detail: entry.detail || '', extra: entry.extra || '', payload: { responses: entry.detail || '', notes: entry.extra || '' } }); if (saved) setHabitOpen(false); }} onCancel={() => setHabitOpen(false)} /></Modal>}
     {activeForm && <Modal title={`${labels[activeForm]} Log`} onClose={() => setActiveForm(null)}><form className="log-form" onSubmit={save}><div className="field-grid"><label>Date<input type="date" value={form.date} onChange={e => set('date', e.target.value)} /></label><label>Time<input type="time" value={form.time} onChange={e => set('time', e.target.value)} /></label></div>
       {activeForm === 'food' && <><label>Meal Type<select value={form.meal} onChange={e => set('meal', e.target.value)}>{['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(x => <option key={x}>{x}</option>)}</select></label><div className="entry-group"><div className="entry-group__heading"><label>Food Items</label><button type="button" className="text-button" onClick={() => setForm(x => ({ ...x, foods: [...x.foods, ''] }))}>+ Add Food Item</button></div>{form.foods.map((food, i) => <input key={i} type="text" value={food} placeholder="e.g. Chicken Adobo" aria-label={`Food item ${i + 1}`} onChange={e => setForm(x => ({ ...x, foods: x.foods.map((f, n) => n === i ? e.target.value : f) }))} />)}</div><label>Description<textarea value={form.description} placeholder="Portion sizes or additional notes" onChange={e => set('description', e.target.value)} /></label><label>Photo<input type="file" accept="image/*" onChange={(e: ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) set('photo', URL.createObjectURL(file)); }} /></label>{form.photo && <img className="photo-preview" src={form.photo} alt="Selected food" />}</>}
       {activeForm === 'medication' && <div className="entry-group"><div className="entry-group__heading"><label>Medication Entries</label><button type="button" className="text-button" onClick={() => setForm(x => ({ ...x, medications: [...x.medications, { name: '', dosage: '', unit: 'Tablet' }] }))}>+ Add Medication</button></div>{form.medications.map((med, i) => <div className="medication-entry" key={i}><label>Medicine Name<input type="text" value={med.name} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, name: e.target.value } : m) }))} /></label><label>Dosage<input type="number" min="0" value={med.dosage} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, dosage: e.target.value } : m) }))} /></label><label>Unit<select value={med.unit} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, unit: e.target.value } : m) }))}>{['Tablet','Capsule','mg','mcg','g','mL','Units','Drops','Puff','Patch','Injection','Other'].map(x => <option key={x}>{x}</option>)}</select></label>{form.medications.length > 1 && <button className="remove-entry" type="button" onClick={() => setForm(x => ({ ...x, medications: x.medications.filter((_, n) => n !== i) }))}>Remove</button>}</div>)}</div>}
       {activeForm === 'activity' && <><div className="activity-select"><label>Activity Type<select value={form.activity} onChange={e => set('activity', e.target.value)}>{activities.map(x => <option key={x}>{x}</option>)}</select></label><button type="button" className="small-add" onClick={() => setCustomDialog(true)} aria-label="Add custom activity">+</button></div><label>Minutes<input type="number" min="0" value={form.minutes} onChange={e => set('minutes', e.target.value)} /></label><label>Calories Burned <small>Optional</small><input type="number" min="0" value={form.calories} onChange={e => set('calories', e.target.value)} /></label></>}
       {activeForm === 'sleep' && <><div className="field-grid"><label>Sleep Time<input type="time" value={form.sleepTime} onChange={e => set('sleepTime', e.target.value)} /></label><label>Wake Time<input type="time" value={form.wakeTime} onChange={e => set('wakeTime', e.target.value)} /></label></div><label>Duration<input className="readonly-input" value={sleepDuration} readOnly /></label><label>Sleep Quality<select value={form.sleepQuality} onChange={e => set('sleepQuality', e.target.value)}>{['Poor', 'Fair', 'Good', 'Excellent'].map(value => <option key={value}>{value}</option>)}</select></label></>}
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setActiveForm(null)}>Cancel</button><button className="primary-button">Save log</button></div></form></Modal>}
+      {logError && <p className="login-error" role="alert">{logError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setActiveForm(null)}>Cancel</button><button className="primary-button" disabled={logsLoading}>Save log</button></div></form></Modal>}
     {customDialog && <Modal title="Add custom activity" onClose={() => setCustomDialog(false)} compact><div className="log-form"><label>Activity name<input autoFocus type="text" value={customActivity} placeholder="e.g. Yoga" onChange={e => setCustomActivity(e.target.value)} /></label><div className="modal-actions"><button className="secondary-button" onClick={() => setCustomDialog(false)}>Cancel</button><button className="primary-button" onClick={addCustomActivity}>Add activity</button></div></div></Modal>}
   </section>;
 }
