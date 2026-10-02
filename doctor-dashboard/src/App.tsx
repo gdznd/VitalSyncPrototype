@@ -14,6 +14,7 @@ import type { Patient } from './types/patient'
 import type { ProviderGoal } from './types/providerGoal'
 import RecentActivitySummary from './components/RecentActivitySummary'
 import { evaluateGoal, type GoalFrequency } from './lib/goalEvaluator'
+import { followUpPriority } from './lib/patientUtils'
 
 // ... (constants and types remain unchanged, assume they are present)
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
@@ -31,11 +32,6 @@ const providerGoalTemplates = [
 
 const readProviderGoals = (): ProviderGoal[] => {
   try { return JSON.parse(localStorage.getItem(providerGoalStorageKey) ?? '[]') as ProviderGoal[] } catch { return [] }
-}
-
-const followUpPriority = (followUpDate: string): Patient['priority'] => {
-  const days = Math.ceil((new Date(`${followUpDate}T00:00:00`).getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000)
-  return days < 0 ? 'High' : days <= 3 ? 'Medium' : 'Low'
 }
 
 const initialPatients: Patient[] = [
