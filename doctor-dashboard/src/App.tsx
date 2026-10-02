@@ -5,19 +5,19 @@ import './PrototypeExtras.addons.css'
 import { DoctorProfileCard } from './components/DoctorProfileCard'
 import { DoctorProfilePage } from './components/DoctorProfilePage'
 import { DoctorSettingsPage } from './components/DoctorSettingsPage'
-import DoctorPicker from './components/DoctorPicker'
 import { LoginPage } from './components/LoginPage'
 import type { Doctor } from './types/doctor'
 import type { DoctorAccount } from './types/doctorAccount'
 import type { Range } from './types/range'
 import type { Patient } from './types/patient'
 import type { ProviderGoal } from './types/providerGoal'
-import RecentActivitySummary from './components/RecentActivitySummary'
 import { MetricCard } from './components/MetricCard'
 import { PanelHeader } from './components/PanelHeader'
 import { RangeSelect } from './components/RangeSelect'
 import { evaluateGoal, type GoalFrequency } from './lib/goalEvaluator'
 import { followUpPriority } from './lib/patientUtils'
+import { PatientWorkspace } from './components/PatientWorkspace'
+import { PatientProfile } from './components/PatientProfile'
 
 // ... (constants and types remain unchanged, assume they are present)
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
@@ -202,7 +202,7 @@ function App() {
       <div className="sidebar-footer"><DoctorProfileCard initials={currentDoctor.initials} name={currentDoctor.name} specialty={currentDoctor.specialty} onProfile={() => selectNav('Profile')} onSettings={() => selectNav('Settings')} onLogout={handleLogout} /></div>
     </aside>
     <section className="workspace">
-    {active === 'Profile' ? <DoctorProfilePage /> : active === 'Settings' ? <DoctorSettingsPage /> : active === 'Team' && !selectedPatient ? <TeamView doctors={doctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} providerGoals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSaveProviderGoals={saveProviderGoals} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onMessageSelect={setMessagePatientId} onHistorySelect={setHistoryPatientId} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={doctors} activities={activities} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />}
+    {active === 'Profile' ? <DoctorProfilePage /> : active === 'Settings' ? <DoctorSettingsPage /> : active === 'Team' && !selectedPatient ? <TeamView doctors={doctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={doctors} activities={activities} messagesView={<MessagesView patients={[selectedPatient]} selected={selectedPatient} onSelect={setMessagePatientId} />} goalsView={<PatientGoalsView patient={selectedPatient} goals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSave={saveProviderGoals} />} historyView={<HistoryView patients={[selectedPatient]} selectedId={selectedPatient.id} onSelect={setHistoryPatientId} />} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />}
       {false && <>
         <header className="topbar"><div><p className="eyebrow">TUESDAY, JULY 31</p><h1>Good morning, Dr. Dizon</h1></div><div className="top-actions"><button className="icon-button" onClick={() => notify('No new notifications.')}>♧<span className="notification-dot" /></button><button className="primary" onClick={() => notify('Patient enrollment form would open here.')}>+ Add patient</button></div></header>
         {active === 'Overview' ? <Overview patients={records} range={range} setRange={setRange} activityRange={activityRange} setActivityRange={setActivityRange} onPatients={() => selectNav('Patients')} onProfile={goToPatient} onAllActivity={() => setShowAllActivity(true)} reminders={reminders} onReminder={toggleReminder} /> : active === 'Messages' ? <MessagesView patients={records} selected={messagePatient} onSelect={setMessagePatientId} /> : active === 'History' ? <HistoryView patients={records} selectedId={historyPatientId} onSelect={setHistoryPatientId} /> : <EmptyView name={active} />}
@@ -248,12 +248,7 @@ function PatientRegistry({ patients, onRequestOpen, onAdd }: { patients: Patient
   return <section className="registry-page"><header className="patients-header"><div><p className="eyebrow">PATIENT REGISTRY</p><h1>Active Patients</h1><p className="header-copy">Review active lifestyle-monitoring patients and open their clinical workspace.</p></div><button className="primary" onClick={onAdd}>+ Add patient</button></header><div className="registry-controls"><div className="registry-tabs"><button className={tab === 'Out-patient' ? 'active' : ''} onClick={() => setTab('Out-patient')}>Outpatient</button><button className={tab === 'In-patient' ? 'active' : ''} onClick={() => setTab('In-patient')}>Inpatient</button></div><input aria-label="Search patients by name" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients by name" /></div><div className="registry-list">{activePatients.map((patient) => <button className={`registry-card ${patient.priority.toLowerCase()}`} key={patient.id} onClick={() => onRequestOpen(patient)}><span className="avatar" style={{ background: patient.color }}>{patient.initials}</span><span><strong>{patient.name}</strong><small>{patient.uniqueId}</small><small>{patient.email}</small></span><em>{patient.priority}</em></button>)}{activePatients.length === 0 && <div className="registry-empty">No active {tab === 'In-patient' ? 'inpatients' : 'outpatients'} match this search.</div>}</div></section>
 }
 
-function PatientWorkspace({ patient, active, providerGoals, currentDoctorName, onSaveProviderGoals, onReturn, onContact, onReminder, reminderSet, onEdit, onArchive, onMessageSelect, onHistorySelect, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; active: string; providerGoals: ProviderGoal[]; currentDoctorName: string; onSaveProviderGoals: (goals: ProviderGoal[]) => void; onReturn: () => void; onContact: () => void; onReminder: () => void; reminderSet: boolean; onEdit: () => void; onArchive: () => void; onMessageSelect: (id: number) => void; onHistorySelect: (id: number) => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities: string[][] }) {
-  if (active === 'Messages') return <MessagesView patients={[patient]} selected={patient} onSelect={onMessageSelect} />
-  if (active === 'Goals') return <PatientGoalsView patient={patient} goals={providerGoals} currentDoctorName={currentDoctorName} onSave={onSaveProviderGoals} />
-  if (active === 'History') return <HistoryView patients={[patient]} selectedId={patient.id} onSelect={onHistorySelect} />
-  return <PatientProfile patient={patient} onContact={onContact} onReminder={onReminder} reminderSet={reminderSet} onBack={onReturn} onEdit={onEdit} onArchive={onArchive} onUpdateFollowUp={onUpdateFollowUp} onUpdateVisibility={onUpdateVisibility} doctors={doctors} activities={activities} />
-}
+
 
 function PatientGoalsView({ patient, goals, currentDoctorName, onSave }: { patient: Patient; goals: ProviderGoal[]; currentDoctorName: string; onSave: (goals: ProviderGoal[]) => void }) {
   const [templateOpen, setTemplateOpen] = useState(false)
@@ -326,39 +321,7 @@ function GoalConfigurationModal({ patient, template, goal, currentDoctorName, on
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal goal-config-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>{goal ? 'Edit Goal' : 'Configure Goal'}</h2><p>Set the details for {patient.name}.</p></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label>Goal<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Nutrition</option><option>Physical Activity</option><option>Sleep</option><option>Stress</option><option>Social Connectedness</option><option>Medication</option><option>Other</option></select></label><label>Target<input required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="e.g. 8 glasses/day" /></label><label>Frequency<select value={frequency} onChange={(event) => setFrequency(event.target.value as GoalFrequency)}><option>Daily</option><option>Weekdays</option><option>Weekly</option></select></label><label>Start date<input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label><label>Review date<input required type="date" value={reviewDate} onChange={(event) => setReviewDate(event.target.value)} /></label><label className="full-width">Instructions / Notes<textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Optional instructions for the patient" /></label></div><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit">{goal ? 'Save changes' : 'Assign Goal'}</button></div></form></div>
 }
 
-function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities: string[][] }) {
-  const [followUp, setFollowUp] = useState(patient.followUpDate)
-  const [vis, setVis] = useState<Patient['visibility']>(patient.visibility)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [selectedDoctors, setSelectedDoctors] = useState<number[]>(patient.selectedDoctors ?? [])
-  const handleFollowUp = (val: string) => { setFollowUp(val); onUpdateFollowUp(patient.id, val) }
-  const handleVisibility = (v: Patient['visibility']) => { setVis(v); if (v !== 'Selected Doctors') onUpdateVisibility(patient.id, v); else setPickerOpen(true) }
-  const selectedDoctorNames = doctors.filter((doctor) => selectedDoctors.includes(doctor.id)).map((doctor) => doctor.name)
-  return <section className="patient-profile"><button className="back-button" onClick={onBack}>← Return to Registry</button><article className="profile-hero"><div className="profile-person"><span className="avatar profile-avatar" style={{ background: patient.color }}>{patient.initials}</span><div><h2>{patient.name}</h2><p>{patient.age} years old · {patient.residence}</p><p className="care-label">{patient.care}</p></div></div><div className="profile-actions"><button onClick={onContact}>Contact</button><button onClick={onReminder}>{reminderSet ? 'Reminder set' : 'Set reminder'}</button><button className="edit-button" onClick={onEdit}>Manage</button><button className="archive-button" onClick={onArchive}>Archive monitoring</button></div></article>
-    <div className="profile-grid">
-      <article className="profile-card"><h3>Patient information</h3>
-        <dl>
-          <div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div>
-          <div><dt>Visibility</dt><dd>
-            <select className="patient-control patient-visibility-control" aria-label="Patient visibility" value={vis} onChange={(e) => handleVisibility(e.target.value as Patient['visibility'])}>
-              <option>Assigned Only</option>
-              <option>Selected Doctors</option>
-              <option>All Doctors</option>
-            </select>
-            {vis === 'Selected Doctors' && <div className="selected-doctors-summary"><span>{selectedDoctorNames.length ? selectedDoctorNames.join(', ') : 'No doctors selected'}</span><button type="button" onClick={() => setPickerOpen(true)}>Open Doctor Picker</button></div>}
-          </dd></div>
-          <div><dt>Patient type</dt><dd>{patient.type}</dd></div>
-          <div><dt>Follow-up</dt><dd><input className="patient-control patient-follow-up-control" aria-label="Patient follow-up date" type="date" value={followUp} onChange={(e) => handleFollowUp(e.target.value)} /></dd></div>
-          <div><dt>Priority level</dt><dd><span className={`priority ${followUpPriority(followUp).toLowerCase()}`}>{followUpPriority(followUp)}</span></dd></div>
-          <div><dt>Care focus</dt><dd>{patient.care}</dd></div>
-        </dl>
-      </article>
-      <article className="profile-card"><h3>Today’s log</h3><div className="log-summary"><span>🍽</span><div><strong>Breakfast submitted</strong><p>8:14 AM · On time</p></div></div><div className="log-summary"><span>☾</span><div><strong>Sleep pending</strong><p>Due by 10:00 AM</p></div></div></article>
-    </div>
-    <RecentActivitySummary activities={activities} patientName={patient.name} patientUniqueId={patient.uniqueId} />
-    {pickerOpen && <div className="modal-backdrop" onMouseDown={() => setPickerOpen(false)}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" onClick={() => { onUpdateVisibility(patient.id, 'Selected Doctors', selectedDoctors); setPickerOpen(false) }}>Confirm selection</button></div></section></div>}
-  </section>
-}
+
 
 function ActivityModal({ range, setRange, onClose }: { range: Range; setRange: (x: Range) => void; onClose: () => void }) { const list = range === 'Today' ? activities.slice(0, 3) : range === 'Past 3 days' ? activities.slice(0, 5) : activities; return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal activity-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><h2>Recent activity</h2><p>All patient submissions and check-ins</p></div><button onClick={onClose}>×</button></div><RangeSelect value={range} setValue={setRange} /><div className="modal-activities">{list.map((a) => <Activity key={a[0] + a[2]} item={a} />)}</div></section></div> }
 function ContactModal({ patient, copied, onMessage, onCopy, onClose }: { patient: Patient; copied: boolean; onMessage: () => void; onCopy: () => void; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal contact-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><h2>Contact {patient.name}</h2><p>Reach them securely through VitalSync.</p></div><button onClick={onClose}>×</button></div><div className="contact-buttons single"><button onClick={onMessage}><span>◌</span>Open secure message</button></div><div className="email-row"><div><small>EMAIL ADDRESS</small><strong>{patient.email}</strong></div><button onClick={onCopy}>{copied ? 'Copied!' : 'Copy email'}</button></div></section></div> }
