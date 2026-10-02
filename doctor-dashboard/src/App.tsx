@@ -10,17 +10,12 @@ import { LoginPage } from './components/LoginPage'
 import type { Doctor } from './types/doctor'
 import type { DoctorAccount } from './types/doctorAccount'
 import type { Range } from './types/range'
+import type { Patient } from './types/patient'
 import RecentActivitySummary from './components/RecentActivitySummary'
 import { evaluateGoal, type EvaluationType, type GoalFrequency } from './lib/goalEvaluator'
 
 // ... (constants and types remain unchanged, assume they are present)
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
-
-type Patient = {
-  id: number; name: string; initials: string; age: number; residence: string; care: string; phone: string; email: string
-  detail: string; status: 'Needs attention' | 'On track' | 'Follow up'; priority: 'High' | 'Medium' | 'Low'; type: 'Out-patient' | 'In-patient'; color: string; assignedSince?: string; followUpDate: string; uniqueId: string; active: boolean; visibility: 'Assigned Only' | 'Selected Doctors' | 'All Doctors'; selectedDoctors?: number[]
-  managingDoctor?: string
-}
 
 type ProviderGoal = {
   id: number
