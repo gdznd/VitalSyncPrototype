@@ -11,30 +11,12 @@ import type { Doctor } from './types/doctor'
 import type { DoctorAccount } from './types/doctorAccount'
 import type { Range } from './types/range'
 import type { Patient } from './types/patient'
+import type { ProviderGoal } from './types/providerGoal'
 import RecentActivitySummary from './components/RecentActivitySummary'
-import { evaluateGoal, type EvaluationType, type GoalFrequency } from './lib/goalEvaluator'
+import { evaluateGoal, type GoalFrequency } from './lib/goalEvaluator'
 
 // ... (constants and types remain unchanged, assume they are present)
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
-
-type ProviderGoal = {
-  id: number
-  patientUniqueId: string
-  title: string
-  category: string
-  target: string
-  frequency: GoalFrequency
-  startDate: string
-  reviewDate: string
-  instructions: string
-  status: 'Active' | 'Paused' | 'Completed' | 'Cancelled'
-  progressPercent: number
-  assignedBy: string
-  evaluationType?: EvaluationType
-  targetValue?: number
-  targetUnit?: string
-  metricKey?: string
-}
 
 const providerGoalStorageKey = 'vitalsync_provider_goals_v1'
 const providerGoalTemplates = [
