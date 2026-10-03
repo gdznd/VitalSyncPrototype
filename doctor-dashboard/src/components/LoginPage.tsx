@@ -84,7 +84,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
         {view === 'register' && (
           <>
             <h2>Register doctor account</h2>
-            <p className="login-subtitle">Create a mock clinic account for the VitalSync dashboard prototype.</p>
+            <p className="login-subtitle">Create your VitalSync doctor account to access the dashboard.</p>
             <form className="auth-form" onSubmit={submitRegister}>
               <label>Full name<input value={fullName} onChange={(e) => setFullName(e.target.value)} required /></label>
               <label>Specialty<select value={specialty} onChange={(e) => setSpecialty(e.target.value)}><option>Lifestyle Medicine</option><option>Cardiology</option><option>Rehab</option><option>Primary Care</option><option>General Medicine</option></select></label>

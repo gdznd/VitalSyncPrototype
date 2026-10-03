@@ -1,8 +1,10 @@
 # VitalSync Backend Implementation (V1)
 
-**Status:** V1 backend integration has passed the manual checks listed below. This is an interview-prototype milestone, not a claim that every item in `BACKEND.md` is complete.
+**Status:** The core V1 backend integration, persistence for existing settings/conversation controls, and patient-owned custom activity choices have passed the checks noted below. Patient profile changes, Selected Doctors manager access, inactive-monitoring behavior, doctor profile reads/updates, and doctor self-registration were checked against local PostgreSQL with synthetic changes rolled back. Migrations `0001`–`0006` are now applied to the configured development database `vitalsync_db`. Before applying `0004`–`0006`, a same-server clone `vitalsync_db_backup_20261004_0052` was created and verified by matching public table lists and row counts (10 tables, 34 rows); it is not an off-machine export. Migrations `0004`–`0006` are also present in the isolated database `vitalsync_e2e_test_20261004`. This remains an interview-prototype milestone, not a claim that every item in `BACKEND.md` is complete.
 
-**Snapshot:** `test-branch` at `b8c1f9a` (`integration 2 | Unusable`), compared with `origin/main`. The working tree also has a local modification to `backend/.env`; no secret values are included in this document.
+**Snapshot:** V1 baseline is `test-branch` at `28c4aa6` (`Backend Integration V1`), compared with `origin/main`. Follow-up priority and server-filtered log updates are currently uncommitted in `doctor-dashboard/src/App.tsx`, `doctor-dashboard/src/lib/api.ts`, `doctor-dashboard/src/components/RecentActivitySummary.tsx`, and `backend/api/logs.py`. Patient profile and inactive-monitoring changes have been round-trip checked against the local database.
+
+**Current worktree update:** Hardcoded doctor activity-feed data and fabricated monitoring-history rows were removed. Monitoring episodes now reflect patient creation/reactivation, archive, and active care-focus changes; doctor notes, one-to-one doctor Team messages, and per-doctor patient reminder preferences use API endpoints and database tables. Existing doctor/patient account settings and per-conversation pin/filter controls are persisted through authenticated endpoints, and doctor defaults are used when creating patients. Built-in activity choices are served by the API; custom activity choices are stored per patient and can be used in the patient's persisted activity logs. Authenticated password changes now work for doctors and patients. Migrations `0004`–`0006` have now been applied to both the configured development database and isolated E2E database. Django checks, 33 automated tests, both frontend production builds, and targeted PostgreSQL/API smoke checks pass. After the configured-database migration, reminder GET returned `200`; doctor note create/list/delete, two-doctor Team send/read, conversation-preference persistence, and important-message payload checks passed in a rolled-back transaction. The configured database currently has one doctor, no pre-existing notes, no pre-existing Team messages, and no reminder preferences; smoke-test records were rolled back. The Django API has been restarted and `/api/health` returns `200`; browser verification remains next. The checked-in endpoint tests are mocked unit/API-view tests; earlier browser smoke checks used synthetic test records. Notification preferences do not send or schedule notifications. The new settings/activity UI flows still need browser verification.
 
 ## 1. Architecture
 
@@ -28,20 +30,30 @@ Patient Portal (Vite, localhost:5174) ───┘
 | `backend/requirements.txt` | Python dependencies for Django REST Framework, PostgreSQL, JWT, bcrypt, CORS, and dotenv. |
 | `backend/.gitignore` | Ignores Python virtual environments, bytecode, test cache, and build output. |
 | `backend/api/apps.py` | Django app registration. |
-| `backend/api/models.py` | Unmanaged Django mappings for users, profiles, monitoring relationships, logs, goals, and messages. |
+| `backend/api/models.py` | Unmanaged Django mappings for users, profiles, monitoring relationships, logs, goals, messages, notes, history episodes, reminders, and account/conversation preferences. |
 | `backend/api/authentication.py` | Validates bearer JWTs and resolves the authenticated database account. |
-| `backend/api/views.py` | Health check, login, doctor registration, current-user response, and patient password change. |
-| `backend/api/patients.py` | Doctor registry, patient invitation/account creation, patient detail, visibility, follow-up, archive, and reactivation. |
-| `backend/api/logs.py` | Patient log create/read and authorized doctor log reads. Stores structured payloads plus UI display fields. |
-| `backend/api/goals.py` | Provider-assigned goal read/write, restricted to authorized doctors; patient read-only endpoint. |
+| `backend/api/views.py` | Health check, login, doctor registration, current-user response, and authenticated doctor/patient password changes. |
+| `backend/api/patients.py` | Doctor registry, patient invitation/account creation, patient detail, visibility, follow-up, archive, and reactivation. The managing doctor remains authorized in `Selected Doctors`. |
+| `backend/api/profiles.py` | Patient-owned profile reads/updates and reauthenticated login-email change; signed-in doctor profile reads/updates without allowing account email edits. |
+| `backend/api/logs.py` | Patient log create/read and authorized doctor log reads. Supports optional validated `start_date`, `end_date`, and `type` filters. Stores structured payloads plus UI display fields. |
+| `backend/api/goals.py` | Provider-assigned goal read/write, restricted to authorized doctors; preserves stored statuses and suspends updates/patient-facing goals while monitoring is inactive. |
 | `backend/api/personal_goals.py` | Patient-owned personal-goal create/read/update; doctor access is denied. |
-| `backend/api/messaging.py` | Patient-safe provider directory and persisted patient-provider conversations. |
+| `backend/api/messaging.py` | Patient-safe provider directory and persisted patient-provider conversations; inactive patients retain only the managing-doctor conversation. |
+| `backend/api/records.py` | Authorized monitoring-history reads, doctor-private notes, one-to-one doctor Team messages, reminder preferences, and monitoring-episode lifecycle helpers. |
+| `backend/api/preferences.py` | Role-specific account settings and owner-scoped conversation pin/filter preferences, with server-side access checks and input validation. |
+| `backend/api/activity_types.py` | Returns built-in activity choices and reads/adds custom activity choices scoped to the authenticated patient. |
 | `backend/api/migrations/0001_add_personal_goal_details.py` | Adds personal-goal date/instructions columns to an existing schema. It is not a full initial schema migration. |
+| `backend/api/migrations/0002_patient_profile_fields.py` | Adds patient-editable contact and health-measure fields to an existing V1 schema. |
+| `backend/api/migrations/0003_doctor_profile_phone.py` | Adds the existing Doctor Dashboard profile phone field to an existing V1 schema. |
+| `backend/api/migrations/0004_persist_activity_history_and_doctor_records.py` | Adds monitoring history, doctor notes, doctor-to-doctor messages, and reminder-preference tables; backfills current monitoring episodes without inventing start dates. Applied to configured development and isolated E2E databases. |
+| `backend/api/migrations/0005_persist_user_and_conversation_preferences.py` | Adds account settings and owner-scoped conversation preferences. Applied to configured development and isolated E2E databases. |
+| `backend/api/migrations/0006_patient_activity_types.py` | Adds the patient-owned custom activity-choice table and case-insensitive per-patient uniqueness. Applied to configured development and isolated E2E databases. |
+| `shared/goalEvaluator.ts` | Single frontend goal evaluator imported by both apps; unsupported goal/metric combinations remain unevaluated. |
 | `backend/api/migrations/__init__.py` | Django migration package marker. |
 | `backend/vitalsync_api/settings.py` | Django, PostgreSQL URL, CORS, JWT, SMTP, and Patient Portal URL configuration. Loads `backend/.env`. |
-| `backend/vitalsync_api/urls.py` | Registers the `/api/...` endpoints. |
+| `backend/vitalsync_api/urls.py` | Registers the `/api/...` endpoints, including account and conversation preferences. |
 | `backend/vitalsync_api/asgi.py`, `backend/vitalsync_api/wsgi.py` | Django ASGI/WSGI entry points. |
-| `backend/schema.sql` | Snapshot of the V1 PostgreSQL domain tables, including the legacy `vitals` table. Contains schema only, not patient rows. |
+| `backend/schema.sql` | Snapshot of the PostgreSQL domain tables for a fresh database, including history/notes/team-message/reminder and preference tables plus legacy `vitals` table. Contains schema only, not patient rows. |
 | `backend/src/routes/auth.ts`, `backend/src/routes/patients.ts` | Modified legacy Express routes. They are not the routes served by the current Django API. |
 | `backend/.env` | Local database/JWT/SMTP settings. It is sensitive, currently locally modified, and must not be copied into this guide or shared. See Security below. |
 
@@ -51,30 +63,34 @@ Patient Portal (Vite, localhost:5174) ───┘
 
 | File | Purpose / V1 change |
 |---|---|
-| `doctor-dashboard/src/lib/api.ts` | New authenticated API client for login, doctor registration, patients, logs, goals, messages, visibility, follow-up, and monitoring lifecycle. |
-| `doctor-dashboard/src/App.tsx` | Replaces the local doctor-account mock with API authentication; fetches registry, providers, goals, logs, and messages; sends patient mutations to Django. The UI still has some mock overview/history content (see Remaining Work). |
+| `doctor-dashboard/src/lib/api.ts` | Authenticated API client for login, doctor self-registration/profile, patients, logs, goals, patient and Team messages, notes, monitoring history, reminders, account/conversation preferences, visibility, follow-up, and monitoring lifecycle. |
+| `doctor-dashboard/src/App.tsx` | Replaces local doctor-account and record mocks with API-backed registry, patient edits, providers, goals, logs, patient/Team messages, notes, monitoring history, reminder settings, and conversation preferences. Follow-up priority handles past, due-soon, future, and unset dates; the Today’s log card reads actual API logs. |
+| `doctor-dashboard/src/components/DoctorSettingsPage.tsx` | Loads/saves existing doctor workspace, notification, and appearance settings through the API; clinic is persisted on the doctor profile and password changes use the authenticated API endpoint. |
 | `doctor-dashboard/src/components/LoginPage.tsx` | Uses API login and registration instead of browser-only doctor registration. |
-| `doctor-dashboard/src/components/RecentActivitySummary.tsx` | Reads the selected patient's logs from the API rather than local/generated log fallback data. |
+| `doctor-dashboard/src/components/DoctorProfilePage.tsx` | Loads and saves the authenticated doctor's profile through Django; account email is read-only. |
+| `doctor-dashboard/src/components/RecentActivitySummary.tsx` | Reads authorized patient logs from the API and requests server-side date ranges for the selected timeframe; summary metrics remain derived in the frontend. |
 | `doctor-dashboard/src/PrototypeExtras.addons.css` | Small associated UI style adjustment. |
-| `doctor-dashboard/vite.config.ts` | Pins the development server to port `5173` with `strictPort: true`. |
+| `doctor-dashboard/vite.config.ts` | Pins the development server to port `5173` with `strictPort: true` and permits imports from the repository's shared evaluator. |
 | `doctor-dashboard/package-lock.json` | Dependency lockfile changed; no backend logic is implemented here. |
 
 ### Patient Portal
 
 | File | Purpose / V1 change |
 |---|---|
-| `patient-portal/src/lib/api.ts` | New authenticated API client for patient identity, logs, goals, providers, messages, and password change. |
+| `patient-portal/src/lib/api.ts` | Authenticated API client for patient identity, profile, logs, activity choices, goals, providers, messages, account/conversation preferences, and password change. |
+| `patient-portal/src/pages/ProfilePage.tsx` | Loads/saves patient-editable fields; age derives from DOB; login-email change is separately reauthenticated. Profile-photo selection remains preview-only. |
 | `patient-portal/src/App.tsx` | Restores the authenticated patient session and requires a password change for temporary-password accounts. |
 | `patient-portal/src/components/AppShell.tsx` | Connects the authenticated patient identity/logout behavior to the app shell. |
 | `patient-portal/src/pages/ChangePasswordPage.tsx` | New first-login/change-password workflow backed by the API. |
 | `patient-portal/src/pages/LoginPage.tsx` | Uses backend authentication. |
-| `patient-portal/src/pages/HomePage.tsx` | Reads patient logs and posts new logs to the backend. |
+| `patient-portal/src/pages/HomePage.tsx` | Reads and posts patient logs and loads/adds activity choices through the backend. |
 | `patient-portal/src/pages/SummaryPage.tsx` | Uses backend log data for the patient summary. |
-| `patient-portal/src/pages/GoalsPage.tsx` | Separates backend provider goals (read-only to patient) from patient-owned personal goals. |
-| `patient-portal/src/pages/MessagesPage.tsx` | Uses provider directory and persisted patient-provider conversation APIs. |
-| `patient-portal/src/pages/SettingsPage.tsx` | Small settings-page integration adjustment; appearance preferences remain local UI preferences. |
+| `patient-portal/src/pages/GoalsPage.tsx` | Separates backend provider goals (read-only to patient) from patient-owned personal goals and imports the shared evaluator. |
+| `shared/goalEvaluator.ts` | Canonical evaluator used by both frontends; the patient-portal assertion script covers its supported goal cases. |
+| `patient-portal/src/pages/MessagesPage.tsx` | Uses provider directory and persisted patient-provider conversation and preference APIs. |
+| `patient-portal/src/pages/SettingsPage.tsx` | Loads/saves existing patient appearance, accessibility, language, and notification settings through the API. Notification settings do not deliver notifications. |
 | `patient-portal/src/lib/storage.ts` | Deleted obsolete local mock storage for logs/goals/provider goals after those workflows moved to the API. |
-| `patient-portal/vite.config.ts` | Pins the development server to port `5174` with `strictPort: true`. |
+| `patient-portal/vite.config.ts` | Pins the development server to port `5174` with `strictPort: true` and permits imports from the repository's shared evaluator. |
 | `patient-portal/package-lock.json` | Dependency lockfile changed; no backend logic is implemented here. |
 
 ## 4. Setup on Windows
@@ -173,14 +189,17 @@ Configured URLs are `http://localhost:5173` (Doctor Dashboard) and `http://local
 
 ## 5. V1 Manual Verification Checklist
 
-Manual acceptance testing was completed on 2026-10-02. Test-only records were removed afterward.
+Earlier manual acceptance testing was completed on 2026-10-02. The supplementary 2026-10-03 checks below used synthetic records in `vitalsync_e2e_test_20261004`; those test records remain isolated from the configured development database.
 
 - [x] Django check passes; health endpoint confirms PostgreSQL connection.
 - [x] Doctor login succeeds; session and database-backed registry survive refresh.
+- [x] Doctor self-registration persists; duplicate-email registration returns `409`. The synthetic account was rolled back.
+- [x] Doctor profile API unit tests cover authenticated GET/PATCH behavior, role denial, and rejection of account-email edits.
+- [x] After the verified database backup, apply `0003_doctor_profile_phone.py`; live doctor profile GET/PATCH round-trip passed and its synthetic edit was rolled back.
 - [x] Patient login succeeds; session survives refresh.
 - [x] Doctor-created patient invitation appears in the configured Ethereal mailbox and contains login email, temporary password, portal URL, and instructions.
 - [x] Temporary-password patient is forced to change password; after change, the database flag is false.
-- [x] Follow-up update survives refresh; the original test date was restored.
+- [x] Follow-up update survives refresh; the original test date was restored. Priority follows the documented past / today-through-three-days / later rule; an unset date now explicitly maps to Low.
 - [x] Patient food log is persisted in PostgreSQL and appears in the authorized doctor's History/summary.
 - [x] Provider goal persists after refresh, appears to the patient as an assigned target, and has no patient-side edit/pause/cancel controls.
 - [x] Personal goal persists for its patient, is absent from doctor UI, and doctor API access returns `403`.
@@ -190,24 +209,51 @@ Manual acceptance testing was completed on 2026-10-02. Test-only records were re
 - [x] `All Doctors`: test doctor sees John; restoring `Assigned Only` removes access.
 - [x] Archive removes John from active registry while patient login/data remain; reactivation restores active registry without duplication.
 - [x] Second patient sees none of John's logs/goals; doctor view for that patient shows only that patient's data.
+- [x] Doctor log API filters support validated date bounds and log type; live checks returned the expected rows and rejected malformed dates with `400`.
+- [x] Doctor workspace Today’s log card reads backend records and has loading, empty, and error states instead of fabricated breakfast/sleep entries.
+- [x] Applied `schema.sql` and migrations 0001–0006 on an isolated PostgreSQL database; verified migrations 0004–0006 and their tables.
+- [x] Authenticated API smoke checks against that database cover JWT login, authorized/denied history reads, note create/list/delete and author isolation, Team-message send/read, reminder persistence/authorization, and archive/reactivation history.
+- [x] Doctor Dashboard browser smoke checks cover login, registry, monitoring-history display, notes create/reload/delete, Team-message send/reload, and reminder persistence across reload.
+- [x] Patient Portal browser smoke check created a synthetic food log, verified it after reload, then confirmed the same record appears in the authorized doctor's workspace and summary.
 - [x] Temporary doctors, invitation test patient, and exact test logs/goals/messages were removed. John is restored to active monitoring, `Assigned Only`, with no selected doctors.
+- [x] Isolated PostgreSQL/API transaction verified doctor and patient account-preference persistence, conversation-preference reload, doctor defaults on a newly created patient, and `404` for unauthorized patient conversation preferences; all synthetic rows were rolled back.
+- [x] Isolated PostgreSQL/API transaction verified built-in activity options are served by the API, custom activity choices persist per patient, duplicate custom names are idempotent, and a saved custom choice can be used in a persisted activity log; all synthetic rows were rolled back.
+- [x] Create and verify same-server clone `vitalsync_db_backup_20261004_0052` before migrating the configured database; public table lists and row counts match (10 tables, 34 rows).
+- [x] Apply migrations `0004`–`0006` to `vitalsync_db`; verify all seven feature tables and all six API migration records.
+- [x] Against `vitalsync_db`, smoke-test reminder GET, Notes CRUD, two-doctor Team send/read, conversation preference persistence, and important-message payloads in a rolled-back synthetic transaction.
+- [x] Verify demo data was not silently inserted: the configured database currently has one doctor and no pre-existing doctor notes, Team messages, or reminder preferences.
 
-Some presentation elements remain hardcoded demo UI, including the dashboard's "Today's log" card and parts of the doctor overview/activity/monitoring-history displays. Do not treat those as persisted patient-submitted data.
+- [x] 2026-10-04 browser verification against `vitalsync_db` passed: reminders, Notes CRUD, Important/All filters (both sides), custom activity choices, patient/doctor settings and profiles, reminder toggles, Team and patient–doctor messaging, Assigned Only/Selected/All Doctors access, patient logs on both sides, personal and provider goals, follow-up date/priority, and patient-to-patient isolation (synthetic patient VS-0031, now archived).
+- Known frontend-only item (not backend): the doctor theme's visual appearance does not re-apply after a full refresh although the selected option persists.
+
+Transient UI state remains frontend-only by design; the existing doctor/patient account settings and conversation preferences now persist. Notification preferences are stored only and do not deliver notifications. The patient profile's lifestyle overview is derived from backend logs; no fabricated global doctor activity feed or monitoring-history claims remain in the dashboard.
 
 ## 6. Remaining Work / Checklist
 
-These are not hidden failures in the checks above; they are outstanding integration scope or decisions from `BACKEND.md`.
+The four scope decisions in the supplied confirmation are settled: frontend-only canonical goal evaluation, persistence of the existing doctor public-profile editing workflow, deferred photo storage, and doctor self-registration. They are not open questions or blockers.
 
-- [ ] Add/agree on doctor self-profile and patient self-profile API read/update behavior; current profile pages still show hardcoded data.
-- [ ] Replace or clearly isolate hardcoded doctor overview/activity/monitoring-history metrics so they cannot be mistaken for backend data.
-- [ ] Get a researcher/adviser decision for provider-goal state when monitoring is archived (pause/complete/archive); do not invent a clinical transition.
-- [ ] Confirm patient profile fields and edit permissions before storing height, weight, address, conditions, or other profile data.
-- [ ] Decide whether food photos are deferred or need an approved upload approach; browser object URLs are not persisted.
-- [ ] Decide whether password recovery is in scope; current recovery UI is a mock, not a real recovery service.
-- [ ] Confirm one canonical provider-goal evaluator across both frontends; evaluation is currently frontend-side.
-- [ ] Verify the log date-range/filter contract if server-side filtering is required; current doctor summary filters fetched data client-side.
-- [ ] Rehearse the complete interview workflow on a fresh database and a clean machine; the `schema.sql` snapshot has not yet been validated as a full restore procedure.
-- [ ] Add automated API tests for auth, access denial, patient isolation, and mutations; V1 verification above is manual.
+- [x] Back up the configured database as local clone `vitalsync_db_backup_20261003_2330`, then apply migration `0003_doctor_profile_phone.py` and verify the new column/migration record.
+- [x] Verify doctor profile GET/PATCH against PostgreSQL in a rolled-back transaction; unit tests cover role denial and account-email rejection.
+- [x] Verify doctor self-registration returns success and duplicate email returns `409`, then roll back the synthetic account.
+- [x] Remove the hardcoded global activity feed and monitoring-history demo rows; history now reflects persisted monitoring lifecycle events.
+- [x] Persist doctor notes, one-to-one doctor Team messages, and per-doctor patient reminder preferences through authorized API endpoints. Reminder preference storage does not implement push notifications.
+- [x] Run Django system checks and API tests (33 tests); both frontend production builds and `git diff --check` pass.
+- [x] Apply migrations `0004`–`0006` to the configured database only after creating and verifying its same-server backup; retain the isolated E2E migration rehearsal.
+- [x] Persist existing doctor/patient settings and per-conversation preferences; validate role-specific fields, partial updates, malformed values, and owner access.
+- [x] Rehearse migration `0005_persist_user_and_conversation_preferences.py` and verify settings writes/defaults against the isolated and configured databases.
+- [x] Replace the Patient Portal activity chooser's hardcoded/default-only list with API-sourced built-ins and patient-owned custom choices; add migration `0006_patient_activity_types.py`.
+- [x] Connect the Doctor Dashboard password-change control to the authenticated password-change API; patient temporary-password behavior remains supported.
+- [x] Back up the configured V1 database, apply migration `0002_patient_profile_fields.py`, and verify all five new profile columns.
+- [x] Create and verify the pre-migration local database clone; doctor phone/email remain excluded from the patient-safe provider DTO.
+- [x] Exercise profile field update and login-email change against the migrated database in a synthetic transaction; roll back the test records afterward.
+- Persistent food-photo and profile-picture storage is deferred; current selection is preview-only and must not be represented as saved data.
+- [x] Verify archived patients cannot access provider-goal work or the general provider roster, goal rows/statuses remain unchanged, the managing-doctor conversation remains available, and non-managing doctors lose access.
+- [x] Consolidate both frontends on `shared/goalEvaluator.ts`; all 10 evaluator assertions pass, both app builds pass, and Django only stores/returns evaluator inputs.
+- [ ] Follow-up priority boundary tests (past, today, three days out, four days out, unset): the rule is computed in the doctor dashboard frontend (`followUpPriority`), not the backend, so it is outside backend test scope; it passed manual checks.
+- [x] Validate `schema.sql` plus migrations 0001–0006 as a fresh-database setup in the current environment.
+- [ ] Restart the local Django API and browser-test reminders, Notes, Team messaging, doctor/patient Settings, conversation filters, and activity-choice persistence after reload.
+- [ ] Rehearse the complete interview workflow on a clean machine, including all Patient Portal flows and any environment-specific setup.
+- [x] Automated API tests (42 total) cover authentication rejection, role denial, unauthorized-patient denial, patient-scoped log reads, and authorized-patient query composition; mutations are covered by the existing endpoint tests.
 - [ ] Do a final adviser/Feature Contract audit before calling the prototype fully complete.
 
 ## 7. Security and Data Handling

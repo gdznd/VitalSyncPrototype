@@ -22,8 +22,11 @@ export function HomePage() {
   const [activeForm, setActiveForm] = useState<LogType | null>(null);
   const [customDialog, setCustomDialog] = useState(false);
   const [customActivity, setCustomActivity] = useState('');
-  const [activities, setActivities] = useState(['Walking', 'Running', 'Cycling', 'Swimming', 'Hiking']);
-  const [form, setForm] = useState({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }] as Medication[], activity: 'Walking', minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
+  const [activities, setActivities] = useState<string[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [customActivitySaving, setCustomActivitySaving] = useState(false);
+  const [customActivityError, setCustomActivityError] = useState('');
+  const [form, setForm] = useState({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }] as Medication[], activity: '', minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
 
   const [stressOpen, setStressOpen] = useState(false);
   const [socialOpen, setSocialOpen] = useState(false);
@@ -35,6 +38,24 @@ export function HomePage() {
       .then(({ logs: patientLogs }) => { if (active) setLogs(patientLogs); })
       .catch((error) => { if (active) setLogError(error instanceof Error ? error.message : 'Could not load health logs.'); })
       .finally(() => { if (active) setLogsLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    patientApi.getActivityTypes()
+      .then(({ activities: activityTypes }) => {
+        if (!active) return;
+        setActivities(activityTypes);
+        setForm(current => ({
+          ...current,
+          activity: current.activity || activityTypes[0] || '',
+        }));
+      })
+      .catch(error => {
+        if (active) setLogError(error instanceof Error ? error.message : 'Could not load activity options.');
+      })
+      .finally(() => { if (active) setActivitiesLoading(false); });
     return () => { active = false; };
   }, []);
 
@@ -50,7 +71,7 @@ export function HomePage() {
     }
   };
 
-  const resetForm = () => setForm({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }], activity: activities[0], minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
+  const resetForm = () => setForm({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }], activity: activities[0] ?? '', minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
   const openForm = (type: LogType) => { resetForm(); setChooserOpen(false); setActiveForm(type); };
   const sleepDuration = useMemo(() => {
     const [sh, sm] = form.sleepTime.split(':').map(Number); const [wh, wm] = form.wakeTime.split(':').map(Number);
@@ -70,7 +91,24 @@ export function HomePage() {
     void createLog({ type: activeForm, date: form.date, time: form.time, title, detail, extra, payload }).then(saved => { if (saved) setActiveForm(null); });
   };
   const set = (key: string, value: string) => setForm(current => ({ ...current, [key]: value }));
-  const addCustomActivity = () => { const name = customActivity.trim(); if (name) { setActivities(current => [...current, name]); setForm(current => ({ ...current, activity: name })); } setCustomActivity(''); setCustomDialog(false); };
+  const addCustomActivity = async () => {
+    const name = customActivity.trim();
+    if (!name || customActivitySaving) return;
+    setCustomActivitySaving(true);
+    setCustomActivityError('');
+    try {
+      const { activities: savedActivities } = await patientApi.createActivityType(name);
+      setActivities(savedActivities);
+      const selectedActivity = savedActivities.find(activity => activity.toLowerCase() === name.toLowerCase()) ?? name;
+      setForm(current => ({ ...current, activity: selectedActivity }));
+      setCustomActivity('');
+      setCustomDialog(false);
+    } catch (error) {
+      setCustomActivityError(error instanceof Error ? error.message : 'Could not save this activity option.');
+    } finally {
+      setCustomActivitySaving(false);
+    }
+  };
 
   // Gentle reminders
   const reminders = [
@@ -137,10 +175,10 @@ export function HomePage() {
     {activeForm && <Modal title={`${labels[activeForm]} Log`} onClose={() => setActiveForm(null)}><form className="log-form" onSubmit={save}><div className="field-grid"><label>Date<input type="date" value={form.date} onChange={e => set('date', e.target.value)} /></label><label>Time<input type="time" value={form.time} onChange={e => set('time', e.target.value)} /></label></div>
       {activeForm === 'food' && <><label>Meal Type<select value={form.meal} onChange={e => set('meal', e.target.value)}>{['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(x => <option key={x}>{x}</option>)}</select></label><div className="entry-group"><div className="entry-group__heading"><label>Food Items</label><button type="button" className="text-button" onClick={() => setForm(x => ({ ...x, foods: [...x.foods, ''] }))}>+ Add Food Item</button></div>{form.foods.map((food, i) => <input key={i} type="text" value={food} placeholder="e.g. Chicken Adobo" aria-label={`Food item ${i + 1}`} onChange={e => setForm(x => ({ ...x, foods: x.foods.map((f, n) => n === i ? e.target.value : f) }))} />)}</div><label>Description<textarea value={form.description} placeholder="Portion sizes or additional notes" onChange={e => set('description', e.target.value)} /></label><label>Photo<input type="file" accept="image/*" onChange={(e: ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) set('photo', URL.createObjectURL(file)); }} /></label>{form.photo && <img className="photo-preview" src={form.photo} alt="Selected food" />}</>}
       {activeForm === 'medication' && <div className="entry-group"><div className="entry-group__heading"><label>Medication Entries</label><button type="button" className="text-button" onClick={() => setForm(x => ({ ...x, medications: [...x.medications, { name: '', dosage: '', unit: 'Tablet' }] }))}>+ Add Medication</button></div>{form.medications.map((med, i) => <div className="medication-entry" key={i}><label>Medicine Name<input type="text" value={med.name} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, name: e.target.value } : m) }))} /></label><label>Dosage<input type="number" min="0" value={med.dosage} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, dosage: e.target.value } : m) }))} /></label><label>Unit<select value={med.unit} onChange={e => setForm(x => ({ ...x, medications: x.medications.map((m, n) => n === i ? { ...m, unit: e.target.value } : m) }))}>{['Tablet','Capsule','mg','mcg','g','mL','Units','Drops','Puff','Patch','Injection','Other'].map(x => <option key={x}>{x}</option>)}</select></label>{form.medications.length > 1 && <button className="remove-entry" type="button" onClick={() => setForm(x => ({ ...x, medications: x.medications.filter((_, n) => n !== i) }))}>Remove</button>}</div>)}</div>}
-      {activeForm === 'activity' && <><div className="activity-select"><label>Activity Type<select value={form.activity} onChange={e => set('activity', e.target.value)}>{activities.map(x => <option key={x}>{x}</option>)}</select></label><button type="button" className="small-add" onClick={() => setCustomDialog(true)} aria-label="Add custom activity">+</button></div><label>Minutes<input type="number" min="0" value={form.minutes} onChange={e => set('minutes', e.target.value)} /></label><label>Calories Burned <small>Optional</small><input type="number" min="0" value={form.calories} onChange={e => set('calories', e.target.value)} /></label></>}
+      {activeForm === 'activity' && <><div className="activity-select"><label>Activity Type<select value={form.activity} disabled={activitiesLoading || activities.length === 0} onChange={e => set('activity', e.target.value)}>{activitiesLoading ? <option value="">Loading activities...</option> : activities.map(x => <option key={x}>{x}</option>)}</select></label><button type="button" className="small-add" onClick={() => { setCustomActivityError(''); setCustomDialog(true); }} aria-label="Add custom activity">+</button></div><label>Minutes<input type="number" min="0" value={form.minutes} onChange={e => set('minutes', e.target.value)} /></label><label>Calories Burned <small>Optional</small><input type="number" min="0" value={form.calories} onChange={e => set('calories', e.target.value)} /></label></>}
       {activeForm === 'sleep' && <><div className="field-grid"><label>Sleep Time<input type="time" value={form.sleepTime} onChange={e => set('sleepTime', e.target.value)} /></label><label>Wake Time<input type="time" value={form.wakeTime} onChange={e => set('wakeTime', e.target.value)} /></label></div><label>Duration<input className="readonly-input" value={sleepDuration} readOnly /></label><label>Sleep Quality<select value={form.sleepQuality} onChange={e => set('sleepQuality', e.target.value)}>{['Poor', 'Fair', 'Good', 'Excellent'].map(value => <option key={value}>{value}</option>)}</select></label></>}
-      {logError && <p className="login-error" role="alert">{logError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setActiveForm(null)}>Cancel</button><button className="primary-button" disabled={logsLoading}>Save log</button></div></form></Modal>}
-    {customDialog && <Modal title="Add custom activity" onClose={() => setCustomDialog(false)} compact><div className="log-form"><label>Activity name<input autoFocus type="text" value={customActivity} placeholder="e.g. Yoga" onChange={e => setCustomActivity(e.target.value)} /></label><div className="modal-actions"><button className="secondary-button" onClick={() => setCustomDialog(false)}>Cancel</button><button className="primary-button" onClick={addCustomActivity}>Add activity</button></div></div></Modal>}
+      {logError && <p className="login-error" role="alert">{logError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setActiveForm(null)}>Cancel</button><button className="primary-button" disabled={logsLoading || (activeForm === 'activity' && (activitiesLoading || !activities.includes(form.activity)))}>Save log</button></div></form></Modal>}
+    {customDialog && <Modal title="Add custom activity" onClose={() => { if (!customActivitySaving) setCustomDialog(false); }} compact><div className="log-form"><label>Activity name<input autoFocus type="text" maxLength={100} value={customActivity} placeholder="e.g. Yoga" onChange={e => setCustomActivity(e.target.value)} /></label>{customActivityError && <p className="login-error" role="alert">{customActivityError}</p>}<div className="modal-actions"><button className="secondary-button" disabled={customActivitySaving} onClick={() => setCustomDialog(false)}>Cancel</button><button className="primary-button" disabled={customActivitySaving || !customActivity.trim()} onClick={() => void addCustomActivity()}>{customActivitySaving ? 'Saving...' : 'Add activity'}</button></div></div></Modal>}
   </section>;
 }
 

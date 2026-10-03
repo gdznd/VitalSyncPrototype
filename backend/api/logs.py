@@ -96,5 +96,41 @@ def lifestyle_logs(request):
     else:
         return Response({"message": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
 
+    parsed_dates = {}
+    for parameter in ("start_date", "end_date"):
+        value = request.query_params.get(parameter)
+        if value is None:
+            continue
+        try:
+            parsed_value = date.fromisoformat(value)
+        except ValueError:
+            return Response(
+                {"message": f"{parameter} must use YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if parsed_value.isoformat() != value:
+            return Response(
+                {"message": f"{parameter} must use YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        parsed_dates[parameter] = parsed_value
+
+    start_date = parsed_dates.get("start_date")
+    end_date = parsed_dates.get("end_date")
+    if start_date and end_date and start_date > end_date:
+        return Response(
+            {"message": "start_date must be on or before end_date."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    log_type = request.query_params.get("type")
+    if log_type and log_type not in LOG_TYPES:
+        return Response({"message": "Unsupported lifestyle log type."}, status=status.HTTP_400_BAD_REQUEST)
+    if start_date:
+        logs = logs.filter(date__gte=start_date)
+    if end_date:
+        logs = logs.filter(date__lte=end_date)
+    if log_type:
+        logs = logs.filter(type=log_type)
+
     logs = logs.select_related("patient").order_by("-date", "-time", "-id")
     return Response({"logs": [serialize_log(log) for log in logs]})

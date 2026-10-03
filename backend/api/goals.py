@@ -8,7 +8,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from api.models import DoctorProfile, PatientProfile, ProviderGoal
+from api.models import DoctorProfile, MonitoringRelationship, PatientProfile, ProviderGoal
 from api.patients import authorized_patient_ids
 
 FREQUENCIES = {"Daily", "Weekdays", "Weekly"}
@@ -104,10 +104,21 @@ def doctor_provider_goals(request, patient_id):
         return Response({"message": "Doctor profile not found."}, status=status.HTTP_403_FORBIDDEN)
     if not patient:
         return Response({"message": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
+    if not patient.monitoring_active and not MonitoringRelationship.objects.filter(
+        patient_id=patient.id,
+        managing_doctor=doctor,
+    ).exists():
+        return Response({"message": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "GET":
         goals = ProviderGoal.objects.filter(patient_id=patient.id).select_related("patient", "assigned_by_doctor").order_by("id")
         return Response({"goals": [serialize_provider_goal(goal) for goal in goals]})
+
+    if not patient.monitoring_active:
+        return Response(
+            {"message": "Provider goals cannot be managed while monitoring is inactive."},
+            status=status.HTTP_409_CONFLICT,
+        )
 
     submitted = request.data.get("goals")
     if not isinstance(submitted, list):
@@ -152,5 +163,7 @@ def patient_provider_goals(request):
     patient = PatientProfile.objects.filter(user_id=request.user.id).first()
     if not patient:
         return Response({"message": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
+    if not patient.monitoring_active:
+        return Response({"goals": []})
     goals = ProviderGoal.objects.filter(patient_id=patient.id).select_related("patient", "assigned_by_doctor").order_by("id")
     return Response({"goals": [serialize_provider_goal(goal) for goal in goals]})

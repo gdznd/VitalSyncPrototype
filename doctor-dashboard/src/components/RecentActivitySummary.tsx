@@ -6,6 +6,13 @@ type HealthLog = { id: number; type: LogType; date: string; time: string; title:
 
 const ranges = ['Last 3 Days', 'Last 7 Days', 'Last 14 Days', 'Last 30 Days', 'Custom'] as const;
 
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function parseMinutesFromActivity(detail: string) {
   const m = detail.match(/(\d+) minutes/);
   const h = detail.match(/(\d+) hr/);
@@ -32,12 +39,27 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
     let active = true;
     setLoading(true);
     setLoadError('');
-    api.getPatientLogs(patientId)
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    if (range === 'Custom') {
+      if (customStart && customEnd) {
+        startDate = customStart;
+        endDate = customEnd;
+      }
+    } else {
+      const days = range === 'Last 3 Days' ? 3 : range === 'Last 7 Days' ? 7 : range === 'Last 14 Days' ? 14 : 30;
+      const today = new Date();
+      endDate = formatLocalDate(today);
+      today.setHours(0, 0, 0, 0);
+      today.setDate(today.getDate() - (days - 1));
+      startDate = formatLocalDate(today);
+    }
+    api.getPatientLogs(patientId, { startDate, endDate })
       .then(({ logs: patientLogs }) => { if (active) setLogs(patientLogs); })
       .catch((error) => { if (active) setLoadError(error instanceof Error ? error.message : 'Could not load patient logs.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [patientId]);
+  }, [patientId, range, customStart, customEnd]);
 
   const filtered = useMemo(() => {
     const all = logs.slice().sort((a, b) => a.date.localeCompare(b.date));

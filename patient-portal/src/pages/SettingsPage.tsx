@@ -1,26 +1,69 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
+import { patientApi, type PatientPreferencesDto } from '../lib/api';
+
+const defaultPreferences: PatientPreferencesDto = {
+  theme: 'system',
+  accent: 'teal',
+  textSize: 'normal',
+  language: 'English',
+  notifications: {
+    dailyReminder: true,
+    messageAlerts: true,
+    weeklySummary: false,
+    goalReminders: true,
+  },
+};
 
 export function SettingsPage() {
   const navigate = useNavigate();
   const { onLogout } = useOutletContext<{ onLogout: () => void }>();
-  const [dailyReminder, setDailyReminder] = useState(true);
-  const [messageAlerts, setMessageAlerts] = useState(true);
-  const [weeklySummary, setWeeklySummary] = useState(false);
-  const [goalReminders, setGoalReminders] = useState(true);
-
-  const [theme, setTheme] = useState<'light'|'dark'|'system'>(localStorage.getItem('theme') as 'light' | 'dark' | 'system' || 'system');
-  const [accent, setAccent] = useState(localStorage.getItem('accent') || 'teal');
-  const [textSize, setTextSize] = useState<'normal'|'large'|'xlarge'>('normal');
-  const [language, setLanguage] = useState('English');
+  const [preferences, setPreferences] = useState(defaultPreferences);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-accent', accent);
-    localStorage.setItem('accent', accent);
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('theme', theme);
-    document.documentElement.style.setProperty('--patient-font-scale', textSize === 'large' ? '1.08' : textSize === 'xlarge' ? '1.16' : '1');
-  }, [accent, theme, textSize]);
+    let active = true;
+    patientApi.getPreferences()
+      .then(({ preferences: loaded }) => { if (active) setPreferences(loaded); })
+      .catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Could not load settings.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-accent', preferences.accent);
+    document.documentElement.dataset.theme = preferences.theme;
+    document.documentElement.style.setProperty(
+      '--patient-font-scale',
+      preferences.textSize === 'large' ? '1.08' : preferences.textSize === 'xlarge' ? '1.16' : '1',
+    );
+  }, [preferences.accent, preferences.theme, preferences.textSize]);
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      const { preferences: savedPreferences } = await patientApi.updatePreferences(preferences);
+      setPreferences(savedPreferences);
+      setSaved(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Could not save settings.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateNotification = (key: keyof PatientPreferencesDto['notifications'], value: boolean) => {
+    setPreferences((current) => ({
+      ...current,
+      notifications: { ...current.notifications, [key]: value },
+    }));
+    setSaved(false);
+  };
 
   return (
     <section className="settings-panel">
@@ -29,32 +72,39 @@ export function SettingsPage() {
           <p className="eyebrow">Settings</p>
           <h2>Control your experience</h2>
         </div>
+        <button className="primary-button" type="button" onClick={() => void save()} disabled={loading || saving}>
+          {saving ? 'Saving...' : 'Save preferences'}
+        </button>
       </div>
+      {loading && <p role="status">Loading settings...</p>}
+      {error && <p className="inline-note error" role="alert">{error}</p>}
+      {saved && <p className="inline-note" role="status">Preferences saved to your account.</p>}
 
       <div className="settings-section">
         <h3>Notifications</h3>
-        <div className="settings-row"><span>Daily Reminder</span><Toggle value={dailyReminder} onChange={setDailyReminder} /></div>
-        <div className="settings-row"><span>Message Alerts</span><Toggle value={messageAlerts} onChange={setMessageAlerts} /></div>
-        <div className="settings-row"><span>Weekly Summary</span><Toggle value={weeklySummary} onChange={setWeeklySummary} /></div>
-        <div className="settings-row"><span>Goal Reminders</span><Toggle value={goalReminders} onChange={setGoalReminders} /></div>
+        <div className="settings-row"><span>Daily Reminder</span><Toggle value={preferences.notifications.dailyReminder} disabled={loading} onChange={(value) => updateNotification('dailyReminder', value)} /></div>
+        <div className="settings-row"><span>Message Alerts</span><Toggle value={preferences.notifications.messageAlerts} disabled={loading} onChange={(value) => updateNotification('messageAlerts', value)} /></div>
+        <div className="settings-row"><span>Weekly Summary</span><Toggle value={preferences.notifications.weeklySummary} disabled={loading} onChange={(value) => updateNotification('weeklySummary', value)} /></div>
+        <div className="settings-row"><span>Goal Reminders</span><Toggle value={preferences.notifications.goalReminders} disabled={loading} onChange={(value) => updateNotification('goalReminders', value)} /></div>
+        <p className="setting-help">Preferences are stored; notification delivery is not enabled in this prototype.</p>
       </div>
 
       <div className="settings-section">
         <h3>Appearance</h3>
-        <div className="settings-row"><span>Theme</span><div className="radio-group"><label><input type="radio" name="theme" checked={theme==='light'} onChange={() => setTheme('light')} /> Light</label><label><input type="radio" name="theme" checked={theme==='dark'} onChange={() => setTheme('dark')} /> Dark</label><label><input type="radio" name="theme" checked={theme==='system'} onChange={() => setTheme('system')} /> System</label></div></div>
-        <div className="settings-row"><div><span>Accent color</span></div><div className="color-options"><button className={`color-option ${accent === 'teal' ? 'active' : ''}`} style={{ background: '#258a88' }} onClick={() => setAccent('teal')} aria-label="Teal accent" /><button className={`color-option ${accent === 'navy' ? 'active' : ''}`} style={{ background: '#123b51' }} onClick={() => setAccent('navy')} aria-label="Navy accent" /><button className={`color-option ${accent === 'green' ? 'active' : ''}`} style={{ background: '#398b65' }} onClick={() => setAccent('green')} aria-label="Green accent" /><button className={`color-option ${accent === 'purple' ? 'active' : ''}`} style={{ background: '#7661b8' }} onClick={() => setAccent('purple')} aria-label="Purple accent" /></div></div>
+        <div className="settings-row"><span>Theme</span><div className="radio-group"><label><input type="radio" name="theme" checked={preferences.theme === 'light'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, theme: 'light' })); setSaved(false); }} /> Light</label><label><input type="radio" name="theme" checked={preferences.theme === 'dark'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, theme: 'dark' })); setSaved(false); }} /> Dark</label><label><input type="radio" name="theme" checked={preferences.theme === 'system'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, theme: 'system' })); setSaved(false); }} /> System</label></div></div>
+        <div className="settings-row"><div><span>Accent color</span></div><div className="color-options">{(['teal', 'navy', 'green', 'purple'] as const).map((accent) => <button key={accent} type="button" className={`color-option ${preferences.accent === accent ? 'active' : ''}`} style={{ background: { teal: '#258a88', navy: '#123b51', green: '#398b65', purple: '#7661b8' }[accent] }} onClick={() => { setPreferences((current) => ({ ...current, accent })); setSaved(false); }} aria-label={`${accent} accent`} disabled={loading} />)}</div></div>
       </div>
 
       <div className="settings-section">
         <h3>Accessibility</h3>
-        <div className="settings-row"><span>Text Size</span><div className="radio-group"><label><input type="radio" name="textSize" checked={textSize==='normal'} onChange={() => setTextSize('normal')} /> Normal</label><label><input type="radio" name="textSize" checked={textSize==='large'} onChange={() => setTextSize('large')} /> Large</label><label><input type="radio" name="textSize" checked={textSize==='xlarge'} onChange={() => setTextSize('xlarge')} /> Extra Large</label></div></div>
-        <div className="settings-row"><span>Language</span><select value={language} onChange={e => setLanguage(e.target.value)}><option>English</option><option>Filipino</option></select></div>
+        <div className="settings-row"><span>Text Size</span><div className="radio-group"><label><input type="radio" name="textSize" checked={preferences.textSize === 'normal'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, textSize: 'normal' })); setSaved(false); }} /> Normal</label><label><input type="radio" name="textSize" checked={preferences.textSize === 'large'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, textSize: 'large' })); setSaved(false); }} /> Large</label><label><input type="radio" name="textSize" checked={preferences.textSize === 'xlarge'} disabled={loading} onChange={() => { setPreferences((current) => ({ ...current, textSize: 'xlarge' })); setSaved(false); }} /> Extra Large</label></div></div>
+        <div className="settings-row"><span>Language</span><select value={preferences.language} disabled={loading} onChange={(event) => { setPreferences((current) => ({ ...current, language: event.target.value as PatientPreferencesDto['language'] })); setSaved(false); }}><option>English</option><option>Filipino</option></select></div>
       </div>
 
       <div className="settings-section">
-        <h3>Privacy & Data</h3>
+        <h3>Privacy &amp; Data</h3>
         <p className="setting-help">Your health information is used to support your care team and is kept within this prototype workspace.</p>
-        <div className="settings-row"><span>Privacy & Security</span><button className="secondary-button" type="button">View information</button></div>
+        <div className="settings-row"><span>Privacy &amp; Security</span><button className="secondary-button" type="button">View information</button></div>
         <div className="settings-row"><span>Health Information Privacy</span><button className="secondary-button" type="button">View information</button></div>
       </div>
 
@@ -67,6 +117,6 @@ export function SettingsPage() {
   );
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return <button className={`toggle-switch ${value ? 'active' : ''}`} onClick={() => onChange(!value)} aria-pressed={value} />;
+function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (value: boolean) => void; disabled: boolean }) {
+  return <button type="button" className={`toggle-switch ${value ? 'active' : ''}`} disabled={disabled} onClick={() => onChange(!value)} aria-pressed={value} />;
 }

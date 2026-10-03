@@ -1,4 +1,4 @@
-import { evaluateGoal, StructuredGoal, HealthLog } from './goalEvaluator';
+import { evaluateGoal, StructuredGoal, HealthLog } from '../../../shared/goalEvaluator';
 
 function runTests() {
   console.log('Running VitalSync Goal Evaluator Tests (Phase 1)...');
@@ -140,6 +140,9 @@ function runTests() {
   };
   const res8 = evaluateGoal(goal8, [], '2026-09-01');
   assert(res8.evaluable === false, 'Test 8 Failed: Unsupported/custom goal');
+  assert(res8.progressText === 'Progress not automatically evaluated', 'Test 8 Failed: Unsupported goal display text');
+  const unsupportedMetric = evaluateGoal({ ...goal1, metricKey: 'unstructured' }, [], '2026-09-03');
+  assert(unsupportedMetric.evaluable === false, 'Test 8 Failed: Unsupported metric must not be evaluated');
 
   // 9. Goal date boundaries
   const goal9: StructuredGoal = {

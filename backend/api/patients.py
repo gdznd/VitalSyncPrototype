@@ -2,19 +2,21 @@ import logging
 import re
 import secrets
 import smtplib
-from datetime import date
+from datetime import date, timedelta
 
 import bcrypt
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.core.mail import EmailMessage
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from api.models import DoctorProfile, MonitoringRelationship, PatientProfile, UserAccount
+from api.models import AccountPreference, DoctorProfile, MonitoringRelationship, PatientProfile, UserAccount
+from api.profiles import calculate_age
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def serialize_patient(patient):
         "user_id": patient.user_id,
         "unique_id": patient.unique_id,
         "name": patient.name,
-        "age": patient.age,
+        "age": calculate_age(patient.date_of_birth),
         "email": patient.user.email if patient.user else None,
         "created_at": patient.user.created_at if patient.user else None,
         "phone": patient.phone,
@@ -134,6 +136,10 @@ def create_patient(request, doctor_profile):
 
     try:
         with transaction.atomic():
+            preferences = AccountPreference.objects.filter(user_id=doctor_profile.user_id).first()
+            default_patient_type = preferences.default_patient_type if preferences else "Out-patient"
+            default_follow_up_days = preferences.default_follow_up_days if preferences else 7
+            default_visibility = preferences.default_visibility if preferences else "Assigned Only"
             account = UserAccount.objects.create(
                 email=email,
                 password_hash=password_hash,
@@ -146,17 +152,21 @@ def create_patient(request, doctor_profile):
                 name=name,
                 phone=phone.strip() if phone else None,
                 care_focus="General lifestyle care",
-                patient_type="Out-patient",
+                patient_type=default_patient_type,
                 status="On track",
                 priority="Medium",
+                follow_up_date=timezone.localdate() + timedelta(days=default_follow_up_days),
                 monitoring_active=True,
             )
             MonitoringRelationship.objects.create(
                 patient=patient,
                 managing_doctor=doctor_profile,
-                visibility="Assigned Only",
+                visibility=default_visibility,
                 selected_doctor_ids=[],
             )
+            from api.records import start_monitoring_episode
+
+            start_monitoring_episode(patient, doctor_profile)
 
             message = EmailMessage(
                 subject="Your VitalSync Patient Portal account",
@@ -229,16 +239,54 @@ def patient_detail(request, patient_id):
     if request.method == "GET":
         return Response({"patient": serialize_patient(patient)})
 
-    name = request.data.get("name")
-    age = request.data.get("age")
-    if not isinstance(name, str) or not name.strip():
-        return Response({"message": "Name is required."}, status=status.HTTP_400_BAD_REQUEST)
-    if isinstance(age, bool) or not isinstance(age, int) or age < 0:
-        return Response({"message": "Age must be a non-negative integer."}, status=status.HTTP_400_BAD_REQUEST)
+    doctor, managed_patient, error_response = get_managed_patient(request, patient_id)
+    if error_response:
+        return error_response
 
-    patient.name = name.strip()
-    patient.age = age
-    patient.save(update_fields=["name", "age"])
+    allowed_fields = {"name", "careFocus", "patientType", "priority"}
+    if not request.data or not set(request.data).issubset(allowed_fields):
+        return Response(
+            {"message": "Only name, care focus, patient type, and priority can be updated here."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    updates = {}
+    if "name" in request.data:
+        value = request.data["name"]
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 255:
+            return Response({"message": "A valid patient name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["name"] = value.strip()
+    if "careFocus" in request.data:
+        value = request.data["careFocus"]
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 255:
+            return Response({"message": "A valid care focus is required."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["care_focus"] = value.strip()
+    if "patientType" in request.data:
+        value = request.data["patientType"]
+        if not isinstance(value, str) or value not in {"Out-patient", "In-patient"}:
+            return Response({"message": "Invalid patient type."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["patient_type"] = value
+    if "priority" in request.data:
+        value = request.data["priority"]
+        if not isinstance(value, str) or value not in {"High", "Medium", "Low"}:
+            return Response({"message": "Invalid priority."}, status=status.HTTP_400_BAD_REQUEST)
+        updates["priority"] = value
+
+    with transaction.atomic():
+        care_focus = updates.pop("care_focus", None)
+        changed_care_focus = care_focus is not None and care_focus != managed_patient.care_focus
+        for field, value in updates.items():
+            setattr(managed_patient, field, value)
+        if updates:
+            managed_patient.save(update_fields=list(updates))
+        if changed_care_focus:
+            from api.records import change_monitoring_care_focus
+
+            if managed_patient.monitoring_active:
+                change_monitoring_care_focus(managed_patient, doctor, care_focus)
+            else:
+                managed_patient.care_focus = care_focus
+                managed_patient.save(update_fields=["care_focus"])
     return Response({"message": "Patient updated successfully", "patient": serialize_patient(patient)})
 
 
@@ -295,8 +343,12 @@ def archive_patient(request, patient_id):
     if error_response:
         return error_response
 
-    patient.monitoring_active = False
-    patient.save(update_fields=["monitoring_active"])
+    with transaction.atomic():
+        from api.records import end_monitoring_episode
+
+        end_monitoring_episode(patient)
+        patient.monitoring_active = False
+        patient.save(update_fields=["monitoring_active"])
     return Response({"patient": serialize_patient(patient), "message": "Monitoring archived."})
 
 
@@ -315,9 +367,15 @@ def reactivate_patient(request):
     _, managed_patient, error_response = get_managed_patient(request, patient.id)
     if error_response:
         return error_response
+    if managed_patient.monitoring_active:
+        return Response({"patient": serialize_patient(managed_patient), "message": "Monitoring is already active."})
 
-    managed_patient.monitoring_active = True
-    managed_patient.save(update_fields=["monitoring_active"])
+    with transaction.atomic():
+        from api.records import start_monitoring_episode
+
+        managed_patient.monitoring_active = True
+        managed_patient.save(update_fields=["monitoring_active"])
+        start_monitoring_episode(managed_patient, get_doctor_profile(request.user))
     return Response({"patient": serialize_patient(managed_patient), "message": "Monitoring reactivated."})
 
 
@@ -335,6 +393,8 @@ def doctor_directory(request):
                 "name": doctor.name,
                 "initials": doctor.initials or "",
                 "color": doctor.display_color or "#d9ecf1",
+                "specialty": doctor.specialty or "Doctor",
+                "is_current": doctor.user_id == request.user.id,
             }
             for doctor in doctors
         ]
@@ -374,6 +434,10 @@ def update_patient_visibility(request, patient_id):
         return Response({"message": "Monitoring relationship not found."}, status=status.HTTP_404_NOT_FOUND)
 
     relationship.visibility = visibility
-    relationship.selected_doctor_ids = selected_ids if visibility == "Selected Doctors" else []
+    relationship.selected_doctor_ids = (
+        [selected_id for selected_id in selected_ids if selected_id != doctor.id]
+        if visibility == "Selected Doctors"
+        else []
+    )
     relationship.save(update_fields=["visibility", "selected_doctor_ids"])
     return Response({"patient": serialize_patient(patient)})

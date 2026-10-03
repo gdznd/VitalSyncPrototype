@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { patientApi, type PatientLog, type PersonalGoalDto, type ProviderGoal } from '../lib/api';
-import { evaluateGoal, GoalFrequency } from '../lib/goalEvaluator';
+import { evaluateGoal, GoalFrequency } from '../../../shared/goalEvaluator';
 
 type PersonalGoal = PersonalGoalDto;
 

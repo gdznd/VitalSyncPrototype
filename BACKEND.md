@@ -2,7 +2,7 @@
 
 ## Purpose and prototype boundary
 
-Build the smallest persistent backend that makes the existing Doctor Dashboard and Patient Portal behave as one **interview-ready qualitative-research prototype**. The goal is to replace the two applications' separate mock/local data with one authorized source of truth while preserving the approved workflows.
+Build the smallest persistent backend that makes the existing Doctor Dashboard and Patient Portal behave as one **interview-ready qualitative-research prototype**. The V1 Django/PostgreSQL integration now connects the main login, registry, logging, goals, and messaging flows; see `BACKEND_Implementation.md` for the verified implementation snapshot and remaining work. This guide remains the feature and authorization contract for continuing that integration.
 
 This is not a production-healthcare platform brief. Do not add features, workflow variants, analytics, or infrastructure that the current code and contract do not require. The prototype needs correct identity, role isolation, persistence, access checks, and cross-application consistency for the interview flows.
 
@@ -25,7 +25,7 @@ Do not treat mock values, generated fallback records, or decorative UI controls 
 
 ### Separate applications, separate local state
 
-Both are React/Vite applications. Neither calls an API today.
+Both are React/Vite applications. The V1 integration connects core workflows to the Django API; the bullets below describe the original pre-integration prototype state and remaining mock surfaces, not the complete current implementation.
 
 - The Patient Portal stores logs, personal goals, provider goals, and the selected demo patient in browser `localStorage`.
 - The Doctor Dashboard stores provider goals and doctor accounts in browser `localStorage`; its patient registry, follow-ups, visibility, messages, and profiles are mostly in component state or hard-coded data.
@@ -43,7 +43,9 @@ The important local keys are:
 | `vitalsync_doctor_summary_logs_<name>` | Generated/legacy doctor-summary fallback logs | Must not be treated as submitted patient data |
 | `vitalsync_last_reminder` (session storage) | Last randomly selected wellness reminder | Presentation-only; no backend responsibility |
 
-### Identity and isolation limitations that the backend must fix
+### Original prototype identity and isolation limitations
+
+The V1 integration addresses these limitations for connected workflows. Use the implementation guide to distinguish completed flows from remaining mock surfaces.
 
 - Patient Portal login is only `useState(false)` in `App.tsx`; it does not identify a patient. The active patient is selected through `vitalsync_current_patient_id`, defaulting to `VS-0002` (John Dela Cruz).
 - Doctor login matches email and plaintext password against locally stored mock accounts. It sets `currentDoctor` for display but the registry and most records remain the same regardless of the signed-in doctor.
@@ -67,26 +69,27 @@ Use stable backend IDs internally. The existing `VS-0001`-style `uniqueId` is a 
 
 **Doctor profile**
 
-Fields supported by the dashboard/patient profile UI:
+The MVP persists the existing Doctor Dashboard profile workflow:
 
-- account/doctor ID
-- name, email, specialty, initials, display color
-- patient-facing profile data: clinic/organization, professional description (`about`), credential/license text
+- editable: name, specialty/role, clinic/organization, professional description (`about`), credential/license text, and the existing dashboard phone field;
+- account email is the doctor's authentication identity and is displayed read-only, not edited as profile data;
+- the patient-safe provider directory exposes the public profile fields but excludes account email, phone, and editing controls.
 
-The current Doctor Dashboard profile/settings pages may expose additional UI-only fields. Do not assume they are part of the patient-facing profile unless the matrix/workflow requires them. Patient-facing provider profiles intentionally exclude provider email, phone, and editing controls.
+Do not add new doctor settings or profile fields beyond the existing workflows. The existing account settings and conversation controls are persisted through the backend: doctors can save clinic, appearance, workspace defaults, and notification preferences; patients can save appearance, accessibility, language, and notification preferences; each account can save per-conversation pin and notification-filter preferences. Doctor defaults are applied when creating a patient. Notification preferences are stored only and do not deliver notifications.
 
 **Patient profile**
 
-Fields currently present in the dashboard registry/profile data:
+Patient-editable fields:
 
-- account/patient ID and unique ID
-- name, initials, age, residence, phone, email, display color
-- care focus, patient type (`Out-patient` or `In-patient`)
-- current monitoring status/detail: `Needs attention`, `On track`, or `Follow up`; priority `High`/`Medium`/`Low`
-- follow-up date
-- monitoring active/inactive state
+- phone number, home address, emergency contact, date of birth, weight, and height;
+- email address through a separate account operation requiring the current password (not through the ordinary profile update);
+- profile-picture persistent storage is deferred for the MVP. A browser-only preview is not persistent profile data.
 
-The workflow additionally describes patient-editable health-summary details such as height and weight, member-since, last-visit, and doctor-assigned conditions/care focus. Their exact data shape is not established in the supplied source; **Decision needed:** confirm the exact profile fields and which actor may edit each before adding a profile schema beyond what the screens consume.
+Doctor-managed fields:
+
+- canonical patient name, care focus, patient type (`Out-patient` or `In-patient`), monitoring status/detail, priority, follow-up date, managing doctor, visibility, and selected doctors.
+
+Date of birth is the source of truth. Age is derived from date of birth at display time, is not independently editable, and is not stored as a current demographic value. The legacy `age` database column is not used by the API. `memberSince` may be derived from account creation time; `lastVisit` has no approved persistent source and must not be invented.
 
 ### Monitoring relationship, visibility, and lifecycle
 
@@ -106,21 +109,28 @@ Authorization rule for doctor access:
 | Visibility | Authorized doctor access |
 | --- | --- |
 | Assigned Only | The managing/assigned doctor only |
-| Selected Doctors | The managing doctor plus explicitly selected doctors. **Decision needed:** confirm whether the managing doctor is always implicitly included; this guide recommends yes so the record cannot become ownerless. |
+| Selected Doctors | The managing doctor plus explicitly selected additional doctors. The managing doctor always retains access and cannot remove their own access through the selected-doctor list. |
 | All Doctors | Every authenticated doctor in this prototype |
 
 Patient-facing provider availability must be derived from the same relationship/visibility data, not from the current static provider list. Patients cannot add or remove providers themselves.
 
 Archiving does not delete the patient account, historical logs, messages, goals, or monitoring history. It changes the monitoring relationship to inactive. Reactivation locates the existing patient by their unique ID and restores active monitoring rather than creating a duplicate account.
 
+When monitoring is archived:
+
+- preserve every provider-goal record and its existing lifecycle status; do not change it to Paused, Completed, or Cancelled;
+- suspend/hide provider-goal work and patient-facing provider monitoring while inactive;
+- allow the managing doctor to inspect historical goals, but reject goal changes until monitoring is reactivated;
+- show no provider goals or general provider roster to the inactive patient; retain the established managing-doctor conversation only.
+
 While inactive, preserve the workflow invariant:
 
 - patients retain personal lifestyle self-management, history, progress, and personal goals;
 - provider-controlled monitoring functions are suspended;
-- provider-assigned goals are not active monitoring work and need the approved patient-facing transition/completion state;
+- provider-assigned goals retain their stored status and are not active monitoring work;
 - patient messaging is limited to the previous/established doctor conversation.
 
-The exact provider-goal state transition on archive (for example, pause vs. complete vs. archive) is not encoded in current source. **Decision needed:** select one explicit transition before implementation; do not invent one.
+Reactivation restores the provider-management workflow without changing stored provider-goal statuses.
 
 ### Lifestyle logs
 
@@ -148,7 +158,7 @@ The Portal currently records the following input behavior:
 - Stress and social: free-text or guided answers joined with ` || `.
 - Habit: Alcohol, Cigarettes, Vape, Gambling, and Recreational drugs, currently condensed into display strings.
 
-The backend must preserve enough structured data for the listed workflows and goal evaluation. It may retain compatible `title`, `detail`, and `extra` display fields during migration, but must not make parsing strings the long-term source of truth. Store the fields required by actual forms in typed log payloads/records and return a UI-compatible projection. Image upload/storage is not supported by the current persistence model; **Decision needed:** either defer food photos for the prototype or explicitly choose a minimal upload approach. Do not silently persist browser object URLs.
+The backend must preserve enough structured data for the listed workflows and goal evaluation. It may retain compatible `title`, `detail`, and `extra` display fields during migration, but must not make parsing strings the long-term source of truth. Store the fields required by actual forms in typed log payloads/records and return a UI-compatible projection. Persistent food-photo storage is deferred for the MVP; do not introduce upload endpoints, object storage, image processing, or media infrastructure, and do not persist browser object URLs.
 
 Doctors may read an authorized patient's logs. Patients may create/read their own logs. Current UI has no log editing/deletion workflow, so editing/deletion is out of scope unless the contract confirms it.
 
@@ -191,7 +201,7 @@ Supported evaluation behavior in the shared frontend evaluator:
 - `none`: custom/unsupported goal; no automatic evaluation.
 - Daily evaluates each day in the start-to-review/reference window; Weekdays only Monday–Friday; Weekly calculates the weekly aggregate target.
 
-The displayed result is target attainment (such as `5/7 days`, `71%`), never a clinical determination of success/failure. For this prototype, the backend may either return raw authorized logs/goals and let the existing shared evaluator calculate display progress, or provide the same evaluation as a deterministic server service. Do not maintain competing algorithms. **Integration decision required:** choose one canonical evaluator before wiring both apps. The recommended MVP is to keep one tested shared evaluator in the frontend initially and have the backend return structured inputs; move it server-side only if the team needs a single backend-calculated result.
+The displayed result is measurable target attainment (such as `5/7 days`, `71%`), never a clinical determination of success/failure. **MVP decision:** both frontends use the canonical shared frontend evaluator in `shared/goalEvaluator.ts`; the backend persists and returns authorized structured goals and logs but does not calculate progress. Goals that cannot be reliably evaluated from available structured data are not automatically evaluated.
 
 ### Personal Wellness Goals
 
@@ -209,15 +219,17 @@ The current Patient Portal has one-to-one conversations with a static assigned-p
 
 The Doctor Dashboard has a separate prototype message view/state. Neither side persists or shares messages.
 
-For the backend, model a private patient-provider conversation and its messages. Each message needs at least conversation identity, sender account identity, text/body, timestamp, and the current `important` flag. Determine sender role from the authenticated account, not a request value. A patient may access only conversations with providers made available through their assignment/visibility; an authorized provider may access only their permitted patient conversations. Team messaging is separate from patient messaging and is not part of this implementation.
+Patient-provider conversations persist through the backend and remain private to the authorized patient/provider pair. Sender identity comes from the authenticated account. The Doctor Dashboard's one-to-one doctor-to-doctor Team messages are also persisted, scoped to the sender/recipient pair, and kept separate from patient conversations. Group chat and realtime delivery remain out of scope.
 
-The patient UI's pinning, notification-filter dropdown, simulated typing, unread dots, and automatic reply are presentation/prototype behavior—not backend requirements. Realtime delivery, typing, push notifications, and group chats are deferred.
+The patient UI's pinning, notification-filter dropdown, simulated typing, unread dots, and automatic reply are presentation/prototype behavior—not backend requirements. Reminder preferences can be stored, but no push notification or scheduled delivery is implemented.
 
 ### Summaries and follow-ups
 
 Patient and doctor summaries must be derived from the same authorized patient logs. The existing displays calculate meals logged/missed, medication-entry count, activity minutes and favorites, average sleep, reflection/habit counts, date-filtered history, and simple encouraging observations.
 
-The Doctor Dashboard's `RecentActivitySummary` first reads `vitalsync_logs_v1`, then falls back to legacy/generated logs. The backend integration must remove that fallback for connected views: no invented default data may be presented as the patient's submitted history. Empty states are preferable to fabricated logs.
+The Doctor Dashboard's `RecentActivitySummary` reads authorized patient logs from the API and derives its summaries from those returned records. Connected views must not substitute legacy/generated logs; empty states are preferable to fabricated logs.
+
+Monitoring history records real lifecycle events (monitoring start/reactivation, archive, and active care-focus change); unknown legacy dates remain unknown. Doctor notes are private to their author. The dashboard's reminder toggle persists a per-doctor/per-patient preference only; it does not schedule or send a notification.
 
 Follow-up currently consists of a patient `followUpDate`; the dashboard computes priority from it: past = High, due within three days = Medium, otherwise Low. Persist the date. The derived priority can remain frontend logic or be returned by the server, but only one source should drive the display. No appointment scheduling workflow is currently specified.
 
@@ -227,16 +239,19 @@ Exact URL names and framework are implementation choices. Provide a clear servic
 
 | Area | Required responsibility |
 | --- | --- |
-| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Password recovery/registration UI exists, but its real flow is **Decision needed** rather than an assumed requirement. |
-| Doctor profile | Return/edit the signed-in doctor's dashboard profile as supported; return a restricted patient-safe profile only to patients authorized to view that provider. |
+| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Doctors self-register through the existing Doctor Dashboard account-creation flow. Patients and doctors can change their password only after confirming the current password. A doctor-created patient account sends login email, a secure temporary password, and short Patient Portal instructions; the patient changes the temporary password after first login. General password recovery is outside this MVP. |
+| Doctor profile | Persist/edit the signed-in doctor's approved dashboard profile; return a restricted patient-safe profile only to patients authorized to view that provider. |
 | Patient profile/registry | Doctors list/open only patients they are authorized to access. Patients read/update only their own approved profile fields. |
 | Monitoring relationship | Create/add an active patient monitoring relationship, update visibility/selected doctors, archive, reactivate by existing unique ID, and expose active/inactive state. |
 | Provider directory | Return only providers available to the authenticated patient under the assignment/visibility rules, including patient-safe profile fields. |
 | Logs | Patient creates/lists their own logs; authorized doctors list a selected patient's logs with date range/filter support. |
+| Activity choices | Serve built-in activity choices from the API and persist custom activity choices per authenticated patient; never share one patient's custom choices with another. |
 | Summaries | Return logs/aggregates from the same patient data for both apps; never substitute generated mock logs. |
 | Provider goals | Authorized doctor creates, lists, updates lifecycle/definition for an authorized patient; patient reads assigned goals only. |
 | Personal goals | Patient-only create/read/update/cancel; never expose them in doctor APIs or summaries. |
 | Messages | List/create messages in authorized private patient-provider conversations; stable chronological ordering and persisted timestamps. |
+| Doctor records | Persist monitoring lifecycle history, doctor-private notes, one-to-one doctor Team messages, and reminder preferences, with server-side authorization. Reminder storage does not imply push-notification delivery. |
+| Account/conversation preferences | Persist the existing doctor and patient settings and per-conversation pin/filter controls for the authenticated owner. Enforce role-specific fields and conversation access; doctor defaults apply to newly created patients. Notification preferences are storage-only. |
 | Follow-up | Authorized doctor reads/updates the patient's follow-up date; dashboard can derive or receive priority. |
 
 Where useful, provide a patient-workspace/doctor-patient-detail read model so a dashboard screen does not need a waterfall of requests. This is an optimization, not permission to create a second source of truth. Every response must apply the same server-side authorization rules.
@@ -247,6 +262,7 @@ Where useful, provide a patient-workspace/doctor-patient-detail read model so a 
 
 - Can authenticate as exactly one patient account.
 - Can read/write only their own logs, personal goals, and approved profile fields.
+- Can read the built-in activity choices and manage only their own custom activity choices.
 - Can read, but not alter, provider goals assigned to them.
 - Can read only authorized providers and private conversations with those providers.
 - Cannot access another patient's identifiers, logs, messages, goals, monitoring status, or provider-selection controls.
@@ -257,6 +273,8 @@ Where useful, provide a patient-workspace/doctor-patient-detail read model so a 
 - Can authenticate as their own doctor profile.
 - Can see only patients allowed by that patient's monitoring visibility.
 - Can manage provider goals, follow-up, monitoring lifecycle, and visibility only for an authorized patient.
+- Can read that patient's monitoring history and manage their own private notes and reminder preference.
+- Can list/send one-to-one Team messages with another registered doctor; these remain distinct from patient conversations.
 - Cannot access a patient's personal wellness goals.
 - Can message only an authorized patient through the private patient-provider conversation.
 - Cannot gain access by changing an ID in the URL/request body.
@@ -280,14 +298,14 @@ During the transition, local data is a migration aid only. Do not merge browser-
 ## Explicitly out of scope
 
 - Realtime sockets, typing synchronization, live unread delivery, push notifications, and email/SMS delivery.
-- Group chats/team chat.
+- Group chat.
 - Offline sync/conflict resolution.
 - ML/SVM, risk scoring, advanced analytics, or clinical decision support.
 - A clinical-success/failure conclusion from goal attainment.
 - Production-grade compliance certification, audit/compliance systems, enterprise tenancy, high-availability, or scale architecture.
-- Food-photo persistence unless the team makes the explicit decision above.
+- Persistent food-photo and profile-picture storage for this MVP.
 - New logging types, appointment scheduling, medication prescribing, or clinical records not present in the current scope.
-- Functional dark-mode/settings polish and profile-picture work unless separately approved.
+- New settings features or broader settings-page redesign beyond persistence of the existing controls.
 
 Basic secure password handling, authenticated sessions, authorization checks, input validation, and server-side data persistence are not “production extras”; they are the minimum needed to correct the prototype's current identity and isolation failure.
 
@@ -299,24 +317,30 @@ The backend is ready for the interview prototype when all of the following are d
 - Signing in as a patient establishes that patient's identity without a browser-selected demo ID.
 - Patient visibility (`Assigned Only`, `Selected Doctors`, `All Doctors`) is enforced by the server for registry access, patient workspace access, provider availability, and patient-provider messaging.
 - A patient-created lifestyle log persists and becomes visible in the authorized doctor's activity/history/summary using the same underlying record; there are no generated fallback logs in connected views.
+- Built-in activity choices are served by the API, and custom activity choices persist for their patient owner only.
 - Provider goals can be managed by an authorized doctor and viewed/tracked—but not edited or lifecycle-managed—by the assigned patient.
 - Personal goals are visible and mutable only to their owning patient.
 - Patient-safe provider profiles are served from provider data and visible only for authorized assigned/involved providers.
+- Monitoring history is based on persisted monitoring lifecycle events, and no unknown legacy date or adherence value is fabricated.
+- Doctor notes are private to their author; one-to-one doctor Team messages persist between registered doctors.
+- Per-doctor patient reminder preferences persist, but do not imply notification delivery.
+- Existing doctor/patient account settings and conversation pin/filter preferences persist across reloads; doctor defaults are applied to newly created patients.
+- Doctor self-registration and editing of the approved doctor public profile persist in PostgreSQL; account email remains an authentication identity field.
+- Patient and doctor password-change controls update the authenticated account through the API after current-password verification; password recovery remains out of scope.
 - Messages persist and remain private to the authorized patient/provider pair.
 - Archive retains the patient account/history; reactivation uses the existing unique ID and restores monitoring without duplication.
-- Inactive-monitoring behavior follows the documented access rules, including the chosen/approved provider-goal transition.
+- Inactive-monitoring behavior preserves provider-goal rows and statuses, hides patient-facing provider-goal work, prevents goal changes until reactivation, and limits messaging to the established doctor.
 - Follow-up date persists and priority behavior remains consistent with the dashboard.
 - Both applications use the agreed service/API contracts without direct localStorage as their authoritative data source.
 - The team has manually exercised the core interview paths with at least two doctors and more than one patient, including a denied-access check.
 
-## Decisions needed before or during implementation
+## Confirmed implementation decisions
 
-1. Exact patient-profile fields and edit permissions beyond fields already present in source.
-2. Whether a managing doctor is always implicitly included in `Selected Doctors` visibility (recommended: yes).
-3. Provider-goal state/transition when monitoring is archived.
-4. Whether food photos are deferred or receive a minimal upload implementation.
-5. Whether provider-goal evaluation remains the existing shared frontend evaluator initially or becomes a single server evaluator.
-6. The real scope of patient/doctor registration and password recovery; current forms are mock UI, not a confirmed account-provisioning workflow.
-7. Whether current dashboard doctor profile/settings fields beyond the patient-safe profile should persist in this prototype.
+- Goal evaluation remains in one canonical shared frontend evaluator; Django persists and returns its structured inputs.
+- Doctor self-registration is part of the MVP, using the existing Doctor Dashboard registration flow. No separate admin-created-doctor workflow is required.
+- The existing doctor profile editing workflow persists the approved profile fields; account email is not editable as profile data, and provider phone/email are not exposed in the patient-safe directory.
+- Persistent food-photo and profile-picture storage are deferred. Existing previews are not saved.
+- Patient temporary-password change remains in scope. General password recovery is outside the MVP.
+- Authenticated password change is available to doctors as well as patients; it does not add a password-recovery flow.
 
-Do not let any unresolved item block the core authorized data flow. Record the decision, implement the minimal approved version, and keep unapproved expansion out of the prototype.
+Persisting the existing settings controls is a development-scope decision, not a research-scope change. It does not authorize adding new profile or settings fields.

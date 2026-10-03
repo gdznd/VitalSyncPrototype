@@ -44,6 +44,21 @@ export function MessagesPage() {
     return () => { active = false; };
   }, [selectedId]);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    setPinned(false);
+    setNotificationPreference('All messages');
+    patientApi.getConversationPreferences(selectedId)
+      .then(({ preferences }) => {
+        if (!active) return;
+        setPinned(preferences.pinned);
+        setNotificationPreference(preferences.notificationPreference);
+      })
+      .catch((error) => { if (active) setMessageError(error instanceof Error ? error.message : 'Could not load conversation preferences.'); });
+    return () => { active = false; };
+  }, [selectedId]);
+
   useEffect(() => { setTimeout(() => threadRef.current?.scrollTo({ top: threadRef.current?.scrollHeight ?? 0, behavior: 'smooth' }), 50); }, [messagesMap, selectedId, mobileChatOpen]);
 
   const sendMessage = async () => {
@@ -60,6 +75,17 @@ export function MessagesPage() {
       setMessageError(error instanceof Error ? error.message : 'Could not send message.');
     } finally {
       setSending(false);
+    }
+  };
+
+  const updateConversationPreferences = async (changes: { pinned?: boolean; notificationPreference?: 'All messages' | 'Important only' | 'Muted' }) => {
+    try {
+      const { preferences } = await patientApi.updateConversationPreferences(selectedId, changes);
+      setPinned(preferences.pinned);
+      setNotificationPreference(preferences.notificationPreference);
+      setMessageError('');
+    } catch (error) {
+      setMessageError(error instanceof Error ? error.message : 'Could not save conversation preferences.');
     }
   };
 
@@ -121,7 +147,7 @@ export function MessagesPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
               <span className="avatar" style={{ background: selectedProvider.color }}>{selectedProvider.initials}</span>
               <div style={{ flex: 1, minWidth: 0 }}><h2>{selectedProvider.name}</h2><p className="muted small">{selectedProvider.role}</p></div>
-              <div className="conversation-actions"><button className="icon-button" aria-label="Conversation options" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>•••</button>{menuOpen && <div className="conversation-menu"><button type="button" onClick={() => { setPinned(value => !value); setMenuOpen(false); }}>{pinned ? 'Unpin conversation' : 'Pin conversation'}</button><label className="notification-choice">Notifications<select aria-label="Notification preference" value={notificationPreference} onChange={event => setNotificationPreference(event.target.value)}><option>All messages</option><option>Important only</option><option>Muted</option></select></label><button type="button" onClick={() => { setProviderInfoOpen(true); setMenuOpen(false); }}>See Profile</button><small className="conversation-privacy">Private conversation between you and your assigned provider.</small></div>}</div>
+              <div className="conversation-actions"><button className="icon-button" aria-label="Conversation options" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>•••</button>{menuOpen && <div className="conversation-menu"><button type="button" onClick={() => { void updateConversationPreferences({ pinned: !pinned }); setMenuOpen(false); }}>{pinned ? 'Unpin conversation' : 'Pin conversation'}</button><label className="notification-choice">Notifications<select aria-label="Notification preference" value={notificationPreference} onChange={event => { void updateConversationPreferences({ notificationPreference: event.target.value as 'All messages' | 'Important only' | 'Muted' }); }}><option>All messages</option><option>Important only</option><option>Muted</option></select></label><button type="button" onClick={() => { setProviderInfoOpen(true); setMenuOpen(false); }}>See Profile</button><small className="conversation-privacy">Private conversation between you and your assigned provider.</small></div>}</div>
             </div>
           </header>
 

@@ -152,8 +152,8 @@ def current_user(request):
 @permission_classes([IsAuthenticated])
 def change_password(request):
     account = request.user
-    if account.role != "patient":
-        return Response({"message": "Patient account required."}, status=status.HTTP_403_FORBIDDEN)
+    if account.role not in {"doctor", "patient"}:
+        return Response({"message": "Supported account required."}, status=status.HTTP_403_FORBIDDEN)
 
     current_password = request.data.get("currentPassword")
     new_password = request.data.get("newPassword")
@@ -174,7 +174,7 @@ def change_password(request):
         )
 
     password_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
-    UserAccount.objects.filter(id=account.id, role="patient").update(
+    UserAccount.objects.filter(id=account.id, role=account.role).update(
         password_hash=password_hash,
         is_temporary_password=False,
     )

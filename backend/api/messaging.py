@@ -36,6 +36,10 @@ def patient_provider_ids(patient):
     relationship = MonitoringRelationship.objects.filter(patient_id=patient.id).first()
     if not relationship:
         return DoctorProfile.objects.none()
+    if not patient.monitoring_active:
+        if relationship.managing_doctor_id is None:
+            return DoctorProfile.objects.none()
+        return DoctorProfile.objects.filter(id=relationship.managing_doctor_id)
     if relationship.visibility == "All Doctors":
         return DoctorProfile.objects.all()
     allowed_ids = [relationship.managing_doctor_id]
@@ -115,6 +119,13 @@ def doctor_patient_conversation(request, patient_id):
     ).first()
     if not patient:
         return Response({"message": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
+    if not patient.monitoring_active:
+        established_relationship = MonitoringRelationship.objects.filter(
+            patient_id=patient.id,
+            managing_doctor_id=doctor.id,
+        ).exists()
+        if not established_relationship:
+            return Response({"message": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "POST":
         data, error = message_body(request)
