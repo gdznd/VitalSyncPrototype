@@ -39,7 +39,7 @@ Never blur these states together. Ordinary coding discussion and conversation do
 ### Applications and data
 
 - **Patient side:** `patient-portal/`. React 18 + TypeScript + Vite, configured as an installable PWA (`vite-plugin-pwa`), with `react-router-dom`.
-- **Doctor side:** `doctor-dashboard/`. React 19 + TypeScript + Vite web dashboard. Most of its logic is in `src/App.tsx`.
+- **Doctor side:** `doctor-dashboard/`. React 19 + TypeScript + Vite web dashboard. Component responsibilities have been modularized (Patient Workspace, Goals, Messages, Team Messages, and Profile extracted).
 - **No backend, API, or database.** Data lives in browser `localStorage` (`patient-portal/src/lib/storage.ts`) and in hard-coded or in-memory React state.
 - **Mock login only.**
   - Doctor accounts are stored in `localStorage` with plaintext passwords.
