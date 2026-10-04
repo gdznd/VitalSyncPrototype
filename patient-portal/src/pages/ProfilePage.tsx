@@ -1,39 +1,40 @@
 import { useState } from 'react';
+import { getPatientProfile, savePatientProfile, calculateAge } from '../lib/storage';
 
 export function ProfilePage() {
-  const [profile, setProfile] = useState({
-    name: 'John Smith',
-    memberSince: '2020-06-12',
-    primaryPhysician: 'Dr. Maria Santos',
-    lastVisit: '2026-07-30',
-    email: 'john.smith@example.com',
-    address: '123 Main St, Anytown',
-    emergencyContact: 'Jane Smith • 555-0123',
-    conditions: ['Type 2 Diabetes', 'Hypertension']
-  });
-
+  const [profile, setProfile] = useState(() => getPatientProfile());
   const [editing, setEditing] = useState(false);
-  const [avatar, setAvatar] = useState<string | null>(null);
-  const [height, setHeight] = useState('68.7');
-  const [weight, setWeight] = useState('182');
-  const bmi = Number(height) > 0 && Number(weight) > 0 ? (Number(weight) / (Number(height) * Number(height)) * 703).toFixed(1) : '--';
+
+  const ageStr = calculateAge(profile.dateOfBirth);
+  const heightNum = Number(profile.height || 0);
+  const weightNum = Number(profile.weight || 0);
+  const bmi = heightNum > 0 && weightNum > 0 ? (weightNum / (heightNum * heightNum) * 703).toFixed(1) : '--';
 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; setAvatar(URL.createObjectURL(file));
+    const file = e.target.files?.[0]; if (!file) return;
+    const avatarUrl = URL.createObjectURL(file);
+    setProfile((p: any) => ({ ...p, avatar: avatarUrl }));
+  };
+
+  const handleToggleEdit = () => {
+    if (editing) {
+      savePatientProfile(profile);
+    }
+    setEditing(e => !e);
   };
 
   return (
     <section>
       <div className="profile-panel profile-top">
         <div className="profile-summary">
-          <div className="profile-summary-avatar large">{avatar ? <img src={avatar} alt="avatar" /> : 'JS'}</div>
+          <div className="profile-summary-avatar large">{profile.avatar ? <img src={profile.avatar} alt="avatar" /> : 'JS'}</div>
           <div>
             <p className="eyebrow">Patient profile</p>
             <h2>{profile.name}</h2>
             <div className="status-chip">{profile.conditions.join(' • ')}</div>
             <div className="profile-actions">
               {editing && <label className="secondary-button profile-photo-button">Change Photo<input type="file" accept="image/*" onChange={onFile} /></label>}
-              <button className={editing ? 'primary-button' : 'secondary-button'} onClick={() => setEditing(e => !e)}>{editing ? 'Save changes' : 'Edit Profile'}</button>
+              <button className={editing ? 'primary-button' : 'secondary-button'} onClick={handleToggleEdit}>{editing ? 'Save changes' : 'Edit Profile'}</button>
             </div>
           </div>
         </div>
@@ -46,9 +47,9 @@ export function ProfilePage() {
           <div className="profile-section-group">
             <h4 className="profile-subheading">Contact Information</h4>
             <div className="field-grid">
-              {editing ? <label>Email<input value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label> : <div className="profile-value-field"><span>Email</span><strong>{profile.email}</strong></div>}
-              {editing ? <label>Address<textarea value={profile.address} onChange={e => setProfile(p => ({ ...p, address: e.target.value }))} /></label> : <div className="profile-value-field"><span>Address</span><strong>{profile.address}</strong></div>}
-              {editing ? <label>Emergency contact<input value={profile.emergencyContact} onChange={e => setProfile(p => ({ ...p, emergencyContact: e.target.value }))} /></label> : <div className="profile-value-field"><span>Emergency contact</span><strong>{profile.emergencyContact}</strong></div>}
+              {editing ? <label>Email<input value={profile.email} onChange={e => setProfile((p: any) => ({ ...p, email: e.target.value }))} /></label> : <div className="profile-value-field"><span>Email</span><strong>{profile.email}</strong></div>}
+              {editing ? <label>Address<textarea value={profile.address} onChange={e => setProfile((p: any) => ({ ...p, address: e.target.value }))} /></label> : <div className="profile-value-field"><span>Address</span><strong>{profile.address}</strong></div>}
+              {editing ? <label>Emergency contact<input value={profile.emergencyContact} onChange={e => setProfile((p: any) => ({ ...p, emergencyContact: e.target.value }))} /></label> : <div className="profile-value-field"><span>Emergency contact</span><strong>{profile.emergencyContact}</strong></div>}
             </div>
           </div>
 
@@ -73,9 +74,22 @@ export function ProfilePage() {
           </div>
 
           <div className="metric-row">
-            <div className="metric-card"><p>Age</p><strong>48</strong><small>years</small></div>
-            <div className="metric-card editable-metric"><p>Weight</p>{editing ? <input aria-label="Weight in pounds" type="number" min="1" step="0.1" value={weight} onChange={e => setWeight(e.target.value)} /> : <strong>{weight} lbs</strong>}<small> pounds</small></div>
-            <div className="metric-card editable-metric"><p>Height</p>{editing ? <input aria-label="Height in inches" type="number" min="1" step="0.1" value={height} onChange={e => setHeight(e.target.value)} /> : <strong>{height} in</strong>}<small> inches</small></div>
+            <div className="metric-card editable-metric">
+              <p>{editing ? 'Date of Birth' : 'Age'}</p>
+              {editing ? (
+                <input
+                  aria-label="Date of Birth"
+                  type="date"
+                  value={profile.dateOfBirth || ''}
+                  onChange={e => setProfile((p: any) => ({ ...p, dateOfBirth: e.target.value }))}
+                />
+              ) : (
+                <strong>{ageStr === 'Not set' ? 'Not set' : ageStr}</strong>
+              )}
+              <small>{editing ? 'YYYY-MM-DD' : (ageStr === 'Not set' ? 'DOB required' : 'years')}</small>
+            </div>
+            <div className="metric-card editable-metric"><p>Weight</p>{editing ? <input aria-label="Weight in pounds" type="number" min="1" step="0.1" value={profile.weight} onChange={e => setProfile((p: any) => ({ ...p, weight: e.target.value }))} /> : <strong>{profile.weight} lbs</strong>}<small> pounds</small></div>
+            <div className="metric-card editable-metric"><p>Height</p>{editing ? <input aria-label="Height in inches" type="number" min="1" step="0.1" value={profile.height} onChange={e => setProfile((p: any) => ({ ...p, height: e.target.value }))} /> : <strong>{profile.height} in</strong>}<small> inches</small></div>
           </div>
 
           <div className="bmi-highlight-card">
@@ -92,7 +106,7 @@ export function ProfilePage() {
             <h4 className="profile-subheading">Practitioner-managed conditions</h4>
             <p className="form-note">Shown for reference in your care plan.</p>
             <ul className="conditions-list">
-              {profile.conditions.map((c, i) => <li key={i}><span className="condition-bullet">✦</span>{c}</li>)}
+              {profile.conditions.map((c: string, i: number) => <li key={i}><span className="condition-bullet">✦</span>{c}</li>)}
             </ul>
           </div>
         </div>

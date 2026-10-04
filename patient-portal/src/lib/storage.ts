@@ -129,6 +129,80 @@ export function getProviderGoals(): any[] {
   }
 }
 
+export function calculateAge(dateOfBirth?: string | null): string {
+  if (!dateOfBirth) return 'Not set';
+  const parts = dateOfBirth.split('-');
+  if (parts.length !== 3) return 'Not set';
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return 'Not set';
+
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
+
+  if (currentMonth < month || (currentMonth === month && currentDay < day)) {
+    age--;
+  }
+
+  return age >= 0 ? age.toString() : 'Not set';
+}
+
+const PROFILE_KEY_PREFIX = 'vitalsync_patient_profile_';
+
+export function getPatientProfile(): any {
+  try {
+    const currentId = getCurrentPatientId();
+    const raw = localStorage.getItem(PROFILE_KEY_PREFIX + currentId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        name: 'John Smith',
+        memberSince: '2020-06-12',
+        primaryPhysician: 'Dr. Maria Santos',
+        lastVisit: '2026-07-30',
+        email: 'john.smith@example.com',
+        address: '123 Main St, Anytown',
+        emergencyContact: 'Jane Smith • 555-0123',
+        conditions: ['Type 2 Diabetes', 'Hypertension'],
+        dateOfBirth: '',
+        height: '68.7',
+        weight: '182',
+        avatar: null,
+        ...parsed
+      };
+    }
+  } catch (e) {
+    console.error('Failed to read patient profile', e);
+  }
+  return {
+    name: 'John Smith',
+    memberSince: '2020-06-12',
+    primaryPhysician: 'Dr. Maria Santos',
+    lastVisit: '2026-07-30',
+    email: 'john.smith@example.com',
+    address: '123 Main St, Anytown',
+    emergencyContact: 'Jane Smith • 555-0123',
+    conditions: ['Type 2 Diabetes', 'Hypertension'],
+    dateOfBirth: '',
+    height: '68.7',
+    weight: '182',
+    avatar: null
+  };
+}
+
+export function savePatientProfile(profile: any) {
+  try {
+    const currentId = getCurrentPatientId();
+    localStorage.setItem(PROFILE_KEY_PREFIX + currentId, JSON.stringify(profile));
+  } catch (e) {
+    console.error('Failed to save patient profile', e);
+  }
+}
+
 export function saveProviderGoals(goals: any[]) {
   try {
     const currentId = getCurrentPatientId();
