@@ -18,10 +18,10 @@ The API is the shared persistence and authorization layer for accounts, profiles
 - Python 3.12 recommended
 - PostgreSQL Server (pgAdmin is optional; it is only a database client)
 - Node.js and npm for the frontends
-- A local `backend/.env` with database and JWT settings
-- SMTP/Ethereal settings only if testing patient invitations
+- A local `backend/.env` copied from `backend/.env.example`, with database and secret settings
+- SMTP settings for patient invitations and password-change verification
 
-Do not share `.env`, database dumps, or real credentials. Never use real patient data.
+Do not commit or share `.env`, database dumps, or real credentials. Never use real patient data.
 
 ## First-time setup
 
@@ -29,13 +29,13 @@ Do not share `.env`, database dumps, or real credentials. Never use real patient
 
 1. Install and start PostgreSQL Server. The default local port is `5432`.
 2. Create an empty database, for example `vitalsync_db`.
-3. Run `backend/schema.sql` against that **new, empty database** to create the application tables. It creates schema only, not demo users or patient records.
-4. Create `backend/.env` with values for your machine:
+3. Copy `backend/.env.example` to `backend/.env`, then set machine-local values:
 
 ```dotenv
 DATABASE_URL=postgresql://<user>:<url-encoded-password>@localhost:5432/vitalsync_db
-JWT_SECRET=<private-random-secret>
 DJANGO_DEBUG=true
+DJANGO_SECRET_KEY=<private-random-secret>
+JWT_SECRET=<separate-private-random-secret>
 PATIENT_PORTAL_URL=http://localhost:5174
 SMTP_HOST=smtp.ethereal.email
 SMTP_PORT=587
@@ -43,9 +43,9 @@ SMTP_USER=<your-ethereal-login>
 SMTP_PASS=<your-ethereal-password>
 ```
 
-`SMTP_*` settings are needed only for patient invitations. Ethereal captures mail in the mailbox used as `SMTP_USER`; it does not deliver to the invitation's `To:` address.
+`SMTP_*` settings are needed for patient invitations and one-time password-change codes. Ethereal captures mail in the mailbox used as `SMTP_USER`; it does not deliver to the invitation's `To:` address.
 
-> `schema.sql` is a fresh-database snapshot, not an upgrade script for an existing database. For an existing database, back it up and review the numbered migrations first; never re-run the schema snapshot over it.
+The initial Django migration creates the PostgreSQL domain schema from its frozen SQL snapshot and initializes Django's framework tables. `backend/schema.sql` remains a readable schema snapshot; do not run it manually before `migrate` or over an existing database.
 
 ### 2. Install and check Django
 
@@ -59,7 +59,7 @@ py -3.12 -m venv .venv-win
 .\.venv-win\Scripts\python.exe manage.py check
 ```
 
-For a fresh database, `migrate` records the API's numbered schema migrations and initializes Django's framework tables. The API's PostgreSQL domain tables are unmanaged Django models; `backend/schema.sql` creates those tables. Do not run migrations against a shared/existing database without a backup and review.
+For a fresh database, `migrate` creates the API schema and Django framework tables. Migration `0000_initial_domain_schema` replaces the previously applied `0001`–`0006` history when Django detects those migrations are already present; `0007` adds the password-change verification table; `0008` records the unmanaged Django model state without creating duplicate tables. Do not run migrations against a shared/existing database without a backup and review.
 
 ### 3. Start the API
 
@@ -89,6 +89,20 @@ npm run dev
 
 The dashboard is at `http://localhost:5173`; the patient portal is at `http://localhost:5174`. Install frontend packages only the first time or after dependency changes.
 
+## Supabase-hosted PostgreSQL preparation
+
+The deployment architecture remains React/Vite → Django/DRF → PostgreSQL. Supabase is the PostgreSQL host only; the applications continue to call Django, and no Supabase client, authentication, or data API is introduced.
+
+Before an explicitly approved deployment:
+
+1. Set `DATABASE_URL` from the Supabase PostgreSQL connection settings. Keep the URL private; include `sslmode=require` when required by the chosen Supabase endpoint.
+2. Set `DJANGO_DEBUG=false`, a unique `DJANGO_SECRET_KEY`, and a separate unique `JWT_SECRET`. Django refuses to start with debug disabled if the Django secret is missing.
+3. Set `DJANGO_ALLOWED_HOSTS` to the API host, `CORS_ALLOWED_ORIGINS` to the deployed frontend origins, and `CSRF_TRUSTED_ORIGINS` where required.
+4. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for patient invitations and password-change verification email.
+5. Review `manage.py migrate --plan`, back up any existing database, and apply Django migrations only after approval.
+
+No Supabase database has been migrated or deployed as part of this revision.
+
 ## Daily startup
 
 1. Start the PostgreSQL Windows service (for example, from Windows Services).
@@ -111,6 +125,8 @@ Do **not** use `npm run dev` inside `backend/` to start the active backend. That
 3. `VitalSyncJWTAuthentication` validates the token, loads the account and role, and makes the authenticated account available to the API view.
 4. The view validates the request, applies role and patient/doctor visibility rules, then reads or writes PostgreSQL through Django models.
 5. The API serializes the result as JSON; the frontend updates its view from that response.
+
+Temporary-password patients are blocked from all other protected resources by `VitalSyncJWTAuthentication`, not only by the Patient Portal routes. They can read their session and use the email-code/password-change endpoints until the backend records a new password.
 
 PostgreSQL is the persistent data store. Django REST Framework is the API and authorization layer. The two React apps are clients; local browser state is not the source of truth for connected records.
 
@@ -162,10 +178,10 @@ This is a practical map of the integration, not a full Git change log.
 | Area | Main files | Why they changed |
 |---|---|---|
 | Django API | `backend/api/views.py`, `patients.py`, `profiles.py`, `logs.py`, `goals.py`, `personal_goals.py`, `messaging.py`, `records.py`, `preferences.py`, `activity_types.py` | Implement login and account flows, persistence, validation, serialization, and role/ownership/visibility checks for connected features. |
-| Django configuration and schema | `backend/api/models.py`, `backend/api/authentication.py`, `backend/api/migrations/0001`–`0006`, `backend/vitalsync_api/settings.py`, `urls.py`, `backend/schema.sql` | Map PostgreSQL tables, validate JWTs, configure the API, register endpoints, and provide the base schema plus incremental changes. |
+| Django configuration and schema | `backend/api/models.py`, `backend/api/authentication.py`, `backend/api/migrations/0000`, `0007`, `0008`, `backend/vitalsync_api/settings.py`, `urls.py`, `backend/schema.sql` | Map PostgreSQL tables, restrict temporary-password JWTs, configure the API from environment variables, register endpoints, and provide initial, incremental, and state-only migrations. |
 | Doctor Dashboard | `doctor-dashboard/src/lib/api.ts`, `App.tsx`, `components/DoctorSettingsPage.tsx`, `components/DoctorProfilePage.tsx`, `components/LoginPage.tsx`, `components/RecentActivitySummary.tsx` | Replace browser-only/fabricated data with API reads and writes; keep authorized doctor workflows and settings connected to the backend. |
 | Patient Portal | `patient-portal/src/lib/api.ts`, `App.tsx`, `components/AppShell.tsx`, `pages/LoginPage.tsx`, `ProfilePage.tsx`, `HomePage.tsx`, `SummaryPage.tsx`, `GoalsPage.tsx`, `MessagesPage.tsx`, `SettingsPage.tsx`, `ChangePasswordPage.tsx`, `lib/storage.ts` | Connect authentication, patient profile/logs/goals/messages/settings to the API and remove obsolete local mock storage. |
-| Shared behavior | `shared/goalEvaluator.ts` | Keep supported goal evaluation consistent across both frontends; Django stores and returns the goal data. |
+| Shared behavior | `shared/goalEvaluator.ts`, `shared/logMetrics.ts` | Keep supported goal evaluation and structured activity/sleep metrics consistent across both frontends; Django stores and returns the goal/log payloads. |
 | Developer/research docs | `BACKEND.md`, `BACKEND_Implementation.md`, `BACKENDREADME.txt`, `WORKFLOW.md`, `ARCHITECTURE.md`, `CLAUDE.md` | Keep the requirements, workflows, architecture, prototype boundaries, and setup/verification guidance aligned. This implementation guide explains how to run and understand the current integration; it does not replace the feature contract or research approvals. |
 
 ## Demo accounts and a safe demo flow
@@ -174,7 +190,7 @@ There are **no shared starter accounts, seeded demo users, or universal password
 
 1. Open the Doctor Dashboard and register the first synthetic doctor using **Create one**. Use an email/password you control locally; there is no built-in default password.
 2. Sign in as that doctor and use **Add Patient** to create a synthetic patient. The patient invitation contains the patient login and temporary password.
-3. For invitation testing, check the Ethereal mailbox configured by `SMTP_USER` (not the test recipient's Ethereal address). The patient must change the temporary password at first login.
+3. For invitation and password-change testing, check the Ethereal mailbox configured by `SMTP_USER` (not the test recipient's Ethereal address). At first login, the patient must request and verify the emailed code before setting a password.
 4. Sign in to the Patient Portal with the invitation credentials, then verify that patient logs/messages/goals are private to that patient and that the authorized doctor sees only accessible records.
 5. Use only synthetic records. Archive test patients when finished; do not place reusable passwords or local database credentials in this guide.
 
@@ -182,9 +198,9 @@ Accounts created in one developer's local database do not exist in a teammate's 
 
 ## Verification and current boundaries
 
-- Django system check passes; the backend test suite has **42 passing tests**.
+- Django system check passes; the focused backend test suite has **58 passing tests**, including login/registration, patient provisioning, authorization, lifecycle, ownership, messaging, structured logs, temporary-password enforcement, and the email-code password-change flow.
 - The 2026-10-04 manual browser run passed the 20 persistence, authorization, and cross-role checks recorded during integration, including patient-to-patient isolation.
-- Notification preferences persist but do not send notifications. Password recovery, photo storage, offline sync, real-time updates, push notifications, and a doctor mobile app are not implemented.
+- Notification preferences persist but do not send notifications. General password recovery, photo storage, offline sync, real-time updates, push notifications, and a doctor mobile app are not implemented.
 - The doctor's selected theme preference persists, but the visual theme does not re-apply after a full browser refresh; that is a frontend issue.
 - Clean-machine rehearsal and the adviser/Feature Contract audit remain group/research checks, not backend implementation blockers.
 - This prototype is not approved for real participant data. Research/ethics requirements and system-readiness review must be satisfied first.
@@ -200,14 +216,14 @@ In this checklist, **V1** and **V2** refer to the project's first and second imp
 ### Backend capabilities added or connected
 
 - [x] Django REST Framework API connected to PostgreSQL.
-- [x] JWT login for doctor and patient accounts, doctor self-registration, and authenticated password change; temporary-password patients must change their password.
+- [x] JWT login for doctor and patient accounts, doctor self-registration, patient registered-email one-time-code password change, and current-password-confirmed doctor password change. Temporary-password patients are restricted from protected resources until completion.
 - [x] Persistent patient and doctor profiles, patient registry, doctor/patient authorization, visibility settings, follow-up dates, and archive/reactivation.
 - [x] Persistent patient lifestyle logs, provider-assigned goals, and patient-owned personal goals.
 - [x] Persistent patient–doctor conversations, doctor-to-doctor Team messages, doctor notes, and monitoring history.
 - [x] Persistent account settings, per-conversation preferences, doctor reminder preferences, and patient-owned custom activity choices.
 - [x] Server-checked access rules keep patient records scoped to the patient and authorized doctors.
-- [x] Django migrations 0001–0006 and `backend/schema.sql` document database setup and schema evolution.
-- [x] Automated API tests and browser verification cover core persistence and authorization flows.
+- [x] Django initial/squashed migration, incremental migration 0007, and state-only migration 0008 support fresh-database schema creation, existing-database upgrades, and migration-state consistency; `backend/schema.sql` remains a reference snapshot.
+- [x] Focused API tests and earlier browser verification cover contract-critical persistence and authorization flows; current API tests use mocked persistence rather than a cloud/database deployment.
 
 ### Main changes from V1 to V2
 
@@ -216,6 +232,6 @@ In this checklist, **V1** and **V2** refer to the project's first and second imp
 - [x] Added database persistence for workflows that previously existed only in app state, including settings, conversation controls, notes, reminders, Team messages, and custom activity choices.
 - [x] Added server-side role, ownership, and doctor–patient visibility enforcement rather than relying on frontend filtering alone.
 - [x] Kept the two React frontends as clients and placed shared persistence/authentication in Django + PostgreSQL.
-- [x] Preserved explicitly deferred features as out of scope: push-notification delivery, password recovery, photo storage, offline sync, real-time updates, and a doctor mobile app.
+- [x] Preserved explicitly deferred features as out of scope: general password recovery, push-notification delivery, photo storage, offline sync, real-time updates, and a doctor mobile app.
 
 All study-facing records must remain synthetic/demo data until research and ethics requirements are met.

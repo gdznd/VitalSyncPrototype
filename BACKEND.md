@@ -145,7 +145,8 @@ Current code persists a common display-oriented log shape:
   time: 'HH:mm',
   title: string,
   detail: string,
-  extra?: string
+  extra?: string,
+  payload: Record<string, unknown>
 }
 ```
 
@@ -153,12 +154,12 @@ The Portal currently records the following input behavior:
 
 - Food: meal type, one or more food item strings, optional description, and an image preview. The current persisted log only stores joined food items in `detail` and description in `extra`; the preview is an in-memory object URL and is not persisted.
 - Medication: one or more medicine name/dosage/unit entries are concatenated into `detail`.
-- Activity: activity name, minutes, optional calories; duration is serialized as `"N minutes"` in `detail`.
-- Sleep: sleep time, wake time, calculated duration, quality; duration/quality are serialized into `extra`.
+- Activity: activity name, minutes, optional calories; `payload.activity` and numeric `payload.minutes` are the calculation source. `detail` remains display text.
+- Sleep: sleep time, wake time, calculated duration, quality; `payload.sleepTime`, `payload.wakeTime`, numeric `payload.durationMinutes`, and `payload.quality` are structured fields. `extra` remains display text.
 - Stress and social: free-text or guided answers joined with ` || `.
 - Habit: Alcohol, Cigarettes, Vape, Gambling, and Recreational drugs, currently condensed into display strings.
 
-The backend must preserve enough structured data for the listed workflows and goal evaluation. It may retain compatible `title`, `detail`, and `extra` display fields during migration, but must not make parsing strings the long-term source of truth. Store the fields required by actual forms in typed log payloads/records and return a UI-compatible projection. Persistent food-photo storage is deferred for the MVP; do not introduce upload endpoints, object storage, image processing, or media infrastructure, and do not persist browser object URLs.
+The API stores the structured log payload unchanged. Patient and doctor summaries and the shared goal evaluator read metric values from payload fields, not by parsing display strings. Missing or invalid activity/sleep measurements are omitted from metric calculations; sleep is never defaulted to eight hours. Older sleep payloads with `sleepTime` and `wakeTime` remain calculable without parsing `extra`. Persistent food-photo storage is deferred for the MVP; do not introduce upload endpoints, object storage, image processing, or media infrastructure, and do not persist browser object URLs.
 
 Doctors may read an authorized patient's logs. Patients may create/read their own logs. Current UI has no log editing/deletion workflow, so editing/deletion is out of scope unless the contract confirms it.
 
@@ -193,10 +194,10 @@ The server must set the assigning doctor from the authenticated actor rather tha
 
 Supported evaluation behavior in the shared frontend evaluator:
 
-- `duration` / `activity`: sum activity minutes per expected day, or aggregate weekly activity.
-- `duration` / `sleep`: compare parsed logged sleep duration to hours target.
+- `duration` / `activity`: sum numeric `payload.minutes` per expected day, or aggregate weekly activity.
+- `duration` / `sleep`: compare `payload.durationMinutes` (or a duration derived from structured sleep/wake times) to the hours target. Missing or invalid values do not count as sleep hours.
 - `indicator` / `food`: presence of a food log counts as the current indicator.
-- `occurrence` / `medication`: medication log detail contains the configured metric key.
+- `occurrence` / `medication`: a structured `payload.medications[].name` contains the configured metric key.
 - `reflection`: the matching stress/social/habit log type is submitted.
 - `none`: custom/unsupported goal; no automatic evaluation.
 - Daily evaluates each day in the start-to-review/reference window; Weekdays only Monday–Friday; Weekly calculates the weekly aggregate target.
@@ -225,7 +226,7 @@ The patient UI's pinning, notification-filter dropdown, simulated typing, unread
 
 ### Summaries and follow-ups
 
-Patient and doctor summaries must be derived from the same authorized patient logs. The existing displays calculate meals logged/missed, medication-entry count, activity minutes and favorites, average sleep, reflection/habit counts, date-filtered history, and simple encouraging observations.
+Patient and doctor summaries are derived from the same authorized patient logs. The existing displays calculate meals logged/missed, medication-entry count, activity minutes and favorites, average sleep, reflection/habit counts, date-filtered history, and simple encouraging observations. Activity and sleep metrics use structured payload fields; if valid sleep measurements are unavailable the display says "No data" instead of showing a fabricated average.
 
 The Doctor Dashboard's `RecentActivitySummary` reads authorized patient logs from the API and derives its summaries from those returned records. Connected views must not substitute legacy/generated logs; empty states are preferable to fabricated logs.
 
@@ -239,7 +240,7 @@ Exact URL names and framework are implementation choices. Provide a clear servic
 
 | Area | Required responsibility |
 | --- | --- |
-| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Doctors self-register through the existing Doctor Dashboard account-creation flow. Patients and doctors can change their password only after confirming the current password. A doctor-created patient account sends login email, a secure temporary password, and short Patient Portal instructions; the patient changes the temporary password after first login. General password recovery is outside this MVP. |
+| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Doctors self-register through the existing Doctor Dashboard account-creation flow. Patients change their password after receiving and verifying a one-time code sent to their registered email; doctors confirm their current password. A doctor-created patient account sends login email, a secure temporary password, and short Patient Portal instructions; a temporary-password patient can access only session identification and the email-code/password-change endpoints until the password is changed. General password recovery is outside this MVP. |
 | Doctor profile | Persist/edit the signed-in doctor's approved dashboard profile; return a restricted patient-safe profile only to patients authorized to view that provider. |
 | Patient profile/registry | Doctors list/open only patients they are authorized to access. Patients read/update only their own approved profile fields. |
 | Monitoring relationship | Create/add an active patient monitoring relationship, update visibility/selected doctors, archive, reactivate by existing unique ID, and expose active/inactive state. |
@@ -297,7 +298,7 @@ During the transition, local data is a migration aid only. Do not merge browser-
 
 ## Explicitly out of scope
 
-- Realtime sockets, typing synchronization, live unread delivery, push notifications, and email/SMS delivery.
+- Realtime sockets, typing synchronization, live unread delivery, push notifications, and notification email/SMS delivery. Email delivery for patient invitations and password-change verification codes remains in scope.
 - Group chat.
 - Offline sync/conflict resolution.
 - ML/SVM, risk scoring, advanced analytics, or clinical decision support.
@@ -326,7 +327,7 @@ The backend is ready for the interview prototype when all of the following are d
 - Per-doctor patient reminder preferences persist, but do not imply notification delivery.
 - Existing doctor/patient account settings and conversation pin/filter preferences persist across reloads; doctor defaults are applied to newly created patients.
 - Doctor self-registration and editing of the approved doctor public profile persist in PostgreSQL; account email remains an authentication identity field.
-- Patient and doctor password-change controls update the authenticated account through the API after current-password verification; password recovery remains out of scope.
+- Patient password changes require a one-time code sent to the registered email and verified by the backend; temporary-password patients cannot use other protected resources until the new password is set. Doctors continue to confirm their current password. General password recovery remains out of scope.
 - Messages persist and remain private to the authorized patient/provider pair.
 - Archive retains the patient account/history; reactivation uses the existing unique ID and restores monitoring without duplication.
 - Inactive-monitoring behavior preserves provider-goal rows and statuses, hides patient-facing provider-goal work, prevents goal changes until reactivation, and limits messaging to the established doctor.
@@ -340,7 +341,7 @@ The backend is ready for the interview prototype when all of the following are d
 - Doctor self-registration is part of the MVP, using the existing Doctor Dashboard registration flow. No separate admin-created-doctor workflow is required.
 - The existing doctor profile editing workflow persists the approved profile fields; account email is not editable as profile data, and provider phone/email are not exposed in the patient-safe directory.
 - Persistent food-photo and profile-picture storage are deferred. Existing previews are not saved.
-- Patient temporary-password change remains in scope. General password recovery is outside the MVP.
-- Authenticated password change is available to doctors as well as patients; it does not add a password-recovery flow.
+- Patient password changes use a registered-email one-time verification code. Temporary-password patients are restricted server-side to the password-change workflow until successful completion.
+- Doctors retain the existing current-password-confirmed password change. No unauthenticated password-recovery flow is added.
 
 Persisting the existing settings controls is a development-scope decision, not a research-scope change. It does not authorize adding new profile or settings fields.

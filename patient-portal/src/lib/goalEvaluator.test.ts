@@ -1,4 +1,5 @@
 import { evaluateGoal, StructuredGoal, HealthLog } from '../../../shared/goalEvaluator';
+import { getActivityMinutes, getMedicationNames, getSleepMinutes } from '../../../shared/logMetrics';
 
 function runTests() {
   console.log('Running VitalSync Goal Evaluator Tests (Phase 1)...');
@@ -17,18 +18,18 @@ function runTests() {
     metricKey: 'activity'
   };
   const logs1: HealthLog[] = [
-    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes' },
-    { id: 2, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Walking', detail: '35 minutes' },
-    { id: 3, type: 'activity', date: '2026-09-03', time: '10:00', title: 'Walking', detail: '30 minutes' }
+    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { activity: 'Walking', minutes: 30 } },
+    { id: 2, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Walking', detail: '35 minutes', payload: { activity: 'Walking', minutes: 35 } },
+    { id: 3, type: 'activity', date: '2026-09-03', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { activity: 'Walking', minutes: 30 } }
   ];
   const res1 = evaluateGoal(goal1, logs1, '2026-09-03');
   assert(res1.achievedCount === 3 && res1.percentage === 100, 'Test 1 Failed: Daily duration goal met');
 
   // 2. Daily duration goal partially met
   const logs2: HealthLog[] = [
-    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes' },
-    { id: 2, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Walking', detail: '15 minutes' },
-    { id: 3, type: 'activity', date: '2026-09-03', time: '10:00', title: 'Walking', detail: '30 minutes' }
+    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { activity: 'Walking', minutes: 30 } },
+    { id: 2, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Walking', detail: '15 minutes', payload: { activity: 'Walking', minutes: 15 } },
+    { id: 3, type: 'activity', date: '2026-09-03', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { activity: 'Walking', minutes: 30 } }
   ];
   const res2 = evaluateGoal(goal1, logs2, '2026-09-03');
   assert(res2.achievedCount === 2 && res2.percentage === 67, 'Test 2 Failed: Daily duration goal partially met');
@@ -47,9 +48,9 @@ function runTests() {
     metricKey: 'activity'
   };
   const logs3: HealthLog[] = [
-    { id: 1, type: 'activity', date: '2026-09-04', time: '10:00', title: 'Walking', detail: '30 minutes' },
-    { id: 2, type: 'activity', date: '2026-09-05', time: '10:00', title: 'Walking', detail: '30 minutes' },
-    { id: 3, type: 'activity', date: '2026-09-06', time: '10:00', title: 'Walking', detail: '30 minutes' }
+    { id: 1, type: 'activity', date: '2026-09-04', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { minutes: 30 } },
+    { id: 2, type: 'activity', date: '2026-09-05', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { minutes: 30 } },
+    { id: 3, type: 'activity', date: '2026-09-06', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { minutes: 30 } }
   ];
   const res3 = evaluateGoal(goal3, logs3, '2026-09-06');
   assert(res3.expectedCount === 1 && res3.achievedCount === 1 && res3.percentage === 100, 'Test 3 Failed: Weekday goal excluding weekends');
@@ -68,7 +69,7 @@ function runTests() {
     metricKey: 'activity'
   };
   const logs4: HealthLog[] = [
-    { id: 1, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Running', detail: '120 minutes' }
+    { id: 1, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Running', detail: '120 minutes', payload: { minutes: 120 } }
   ];
   const res4 = evaluateGoal(goal4, logs4, '2026-09-07');
   assert(res4.evaluable === true, 'Test 4 Failed: Weekly aggregate goal');
@@ -104,7 +105,7 @@ function runTests() {
     metricKey: 'Metformin'
   };
   const logs6: HealthLog[] = [
-    { id: 1, type: 'medication', date: '2026-09-01', time: '09:00', title: 'Medication', detail: 'Metformin 500 mg Tablet' }
+    { id: 1, type: 'medication', date: '2026-09-01', time: '09:00', title: 'Medication', detail: 'Metformin 500 mg Tablet', payload: { medications: [{ name: 'Metformin', dosage: '500 mg', unit: 'Tablet' }] } }
   ];
   const res6 = evaluateGoal(goal6, logs6, '2026-09-01');
   assert(res6.achievedCount === 1 && res6.percentage === 100, 'Test 6 Failed: Medication occurrence goal');
@@ -158,7 +159,7 @@ function runTests() {
     metricKey: 'activity'
   };
   const logs9: HealthLog[] = [
-    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes' }
+    { id: 1, type: 'activity', date: '2026-09-01', time: '10:00', title: 'Walking', detail: '30 minutes', payload: { minutes: 30 } }
   ];
   const res9 = evaluateGoal(goal9, logs9, '2026-09-05');
   assert(res9.achievedCount === 0, 'Test 9 Failed: Goal date boundaries');
@@ -178,6 +179,25 @@ function runTests() {
   };
   const res10 = evaluateGoal(goal10, [], '2026-09-03');
   assert(res10.achievedCount === 0 && res10.percentage === 0, 'Test 10 Failed: No qualifying log data');
+
+  const malformedSleep = evaluateGoal(
+    goal10,
+    [{ id: 2, type: 'sleep', date: '2026-09-02', time: '22:00', title: 'Sleep', detail: 'unknown', extra: 'unknown' }],
+    '2026-09-03',
+  );
+  assert(malformedSleep.achievedCount === 0, 'Malformed sleep strings must not imply an 8-hour value');
+  assert(getSleepMinutes({ sleepTime: '22:30', wakeTime: '06:30' }) === 480, 'Sleep duration should derive from structured times');
+  assert(getSleepMinutes({ sleepTime: 'invalid', wakeTime: '06:30' }) === null, 'Invalid sleep times must be unavailable');
+  assert(getActivityMinutes({ minutes: 42 }) === 42, 'Activity minutes should come from the structured payload');
+  assert(getActivityMinutes({ minutes: '42' }) === null, 'String activity durations must not be parsed');
+  assert(getMedicationNames({ medications: [{ name: 'Metformin' }] })[0] === 'Metformin', 'Medication names should come from structured payload');
+
+  const sleepGoal = evaluateGoal(
+    goal10,
+    [{ id: 3, type: 'sleep', date: '2026-09-02', time: '22:00', title: 'Sleep', detail: 'display text', payload: { durationMinutes: 480 } }],
+    '2026-09-03',
+  );
+  assert(sleepGoal.achievedCount === 1, 'Structured sleep duration should count toward the goal');
 
   console.log('All 10 VitalSync Goal Evaluator Tests passed successfully!');
 }

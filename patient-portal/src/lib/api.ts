@@ -160,10 +160,20 @@ export const patientApi = {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newEmail }),
     }),
-  changePassword: (currentPassword: string, newPassword: string) =>
+  requestPasswordChangeCode: () =>
+    fetchWithAuth<{ message: string }>('/auth/change-password/code', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  verifyPasswordChangeCode: (code: string) =>
+    fetchWithAuth<{ message: string }>('/auth/change-password/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  changePassword: (newPassword: string) =>
     fetchWithAuth<{ message: string }>('/auth/change-password', {
       method: 'POST',
-      body: JSON.stringify({ currentPassword, newPassword }),
+      body: JSON.stringify({ newPassword }),
     }),
   getPreferences: () => fetchWithAuth<{ preferences: PatientPreferencesDto }>('/preferences'),
   updatePreferences: (changes: Partial<PatientPreferencesDto>) =>

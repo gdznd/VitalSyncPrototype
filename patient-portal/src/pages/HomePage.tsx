@@ -73,11 +73,12 @@ export function HomePage() {
 
   const resetForm = () => setForm({ date: today(), time: now(), meal: 'Breakfast', foods: [''], description: '', photo: '', medications: [{ name: '', dosage: '', unit: 'Tablet' }], activity: activities[0] ?? '', minutes: '30', calories: '', sleepTime: '22:30', wakeTime: '06:30', sleepQuality: 'Good' });
   const openForm = (type: LogType) => { resetForm(); setChooserOpen(false); setActiveForm(type); };
-  const sleepDuration = useMemo(() => {
+  const sleepDurationMinutes = useMemo(() => {
     const [sh, sm] = form.sleepTime.split(':').map(Number); const [wh, wm] = form.wakeTime.split(':').map(Number);
     let minutes = wh * 60 + wm - (sh * 60 + sm); if (minutes < 0) minutes += 1440;
-    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+    return minutes;
   }, [form.sleepTime, form.wakeTime]);
+  const sleepDuration = `${Math.floor(sleepDurationMinutes / 60)}h ${sleepDurationMinutes % 60}m`;
   const todayLogs = logs.filter(log => log.date === today()).sort((a, b) => a.time.localeCompare(b.time));
 
   const save = (event: FormEvent) => {
@@ -87,7 +88,7 @@ export function HomePage() {
     if (activeForm === 'food') { const foods = form.foods.filter(Boolean); title = form.meal; detail = foods.join(' · ') || 'Food entry'; extra = form.description; payload = { mealType: form.meal, foodItems: foods, description: form.description }; }
     if (activeForm === 'medication') { const meds = form.medications.filter(m => m.name); title = 'Medication'; detail = meds.map(m => `${m.name}${m.dosage ? ` ${m.dosage} ${m.unit}` : ''}`).join(' · ') || 'Medication entry'; payload = { medications: meds }; }
     if (activeForm === 'activity') { title = form.activity; detail = `${form.minutes} minutes`; extra = form.calories ? `${form.calories} calories burned` : ''; payload = { activity: form.activity, minutes: Number(form.minutes), calories: form.calories ? Number(form.calories) : null }; }
-    if (activeForm === 'sleep') { title = 'Sleep'; detail = `${formatTime(form.sleepTime)} → ${formatTime(form.wakeTime)}`; extra = `${sleepDuration} · Sleep quality: ${form.sleepQuality}`; payload = { sleepTime: form.sleepTime, wakeTime: form.wakeTime, duration: sleepDuration, quality: form.sleepQuality }; }
+    if (activeForm === 'sleep') { title = 'Sleep'; detail = `${formatTime(form.sleepTime)} → ${formatTime(form.wakeTime)}`; extra = `${sleepDuration} · Sleep quality: ${form.sleepQuality}`; payload = { sleepTime: form.sleepTime, wakeTime: form.wakeTime, duration: sleepDuration, durationMinutes: sleepDurationMinutes, quality: form.sleepQuality }; }
     void createLog({ type: activeForm, date: form.date, time: form.time, title, detail, extra, payload }).then(saved => { if (saved) setActiveForm(null); });
   };
   const set = (key: string, value: string) => setForm(current => ({ ...current, [key]: value }));

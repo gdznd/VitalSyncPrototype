@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { getActivityMinutes, getSleepMinutes } from '../../../shared/logMetrics';
 
 type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit';
-type HealthLog = { id: number; type: LogType; date: string; time: string; title: string; detail: string; extra?: string };
+type HealthLog = { id: number; type: LogType; date: string; time: string; title: string; detail: string; extra?: string; payload?: Record<string, unknown> | null };
 
 const ranges = ['Last 3 Days', 'Last 7 Days', 'Last 14 Days', 'Last 30 Days', 'Custom'] as const;
 
@@ -11,19 +12,6 @@ function formatLocalDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-function parseMinutesFromActivity(detail: string) {
-  const m = detail.match(/(\d+) minutes/);
-  const h = detail.match(/(\d+) hr/);
-  const minutes = (m ? parseInt(m[1], 10) : 0) + (h ? parseInt(h[1], 10) * 60 : 0);
-  return minutes || (parseInt(detail, 10) || 0);
-}
-
-function parseSleepMinutes(extra: string) {
-  const m = extra.match(/(\d+)h (\d+)m/);
-  if (!m) return 0;
-  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
 
 export default function RecentActivitySummary({ patientId, patientName }: { patientId: number; patientName: string }) {
@@ -96,10 +84,25 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const mealsMissed = Math.max(0, daysCount * 3 - mealsLogged);
   const medicationEntries = filtered.filter(l => l.type === 'medication').length;
 
-  const activityMinutes = filtered.filter(l => l.type === 'activity').reduce((sum, l) => sum + parseMinutesFromActivity(l.detail || ''), 0);
-  const activityByType = filtered.filter(l => l.type === 'activity').reduce((acc: Record<string, number>, l) => { acc[l.title] = (acc[l.title] || 0) + parseMinutesFromActivity(l.detail || ''); return acc; }, {});
+  const activities = filtered
+    .filter((log) => log.type === 'activity')
+    .map((log) => ({
+      name: typeof log.payload?.activity === 'string' && log.payload.activity.trim()
+        ? log.payload.activity.trim()
+        : log.title,
+      minutes: getActivityMinutes(log.payload),
+    }))
+    .filter((activity): activity is { name: string; minutes: number } => activity.minutes !== null);
+  const activityMinutes = activities.reduce((sum, activity) => sum + activity.minutes, 0);
+  const activityByType = activities.reduce((acc: Record<string, number>, activity) => {
+    acc[activity.name] = (acc[activity.name] || 0) + activity.minutes;
+    return acc;
+  }, {});
 
-  const sleepMinutesArr = filtered.filter(l => l.type === 'sleep').map(l => parseSleepMinutes(l.extra || ''));
+  const sleepMinutesArr = filtered
+    .filter((log) => log.type === 'sleep')
+    .map((log) => getSleepMinutes(log.payload))
+    .filter((minutes): minutes is number => minutes !== null);
   const avgSleepMin = sleepMinutesArr.length ? Math.round(sleepMinutesArr.reduce((a, b) => a + b, 0) / sleepMinutesArr.length) : 0;
   const avgSleep = sleepMinutesArr.length ? `${Math.floor(avgSleepMin / 60)}h ${avgSleepMin % 60}m` : 'No data';
 

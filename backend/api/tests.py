@@ -1,12 +1,15 @@
 from contextlib import nullcontext
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import bcrypt
 from django.test import SimpleTestCase
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from api.authentication import VitalSyncJWTAuthentication
 from api.models import UserAccount
 from api.activity_types import BUILT_IN_ACTIVITY_TYPES, patient_activity_types
 from api.preferences import account_preferences, conversation_preferences
@@ -20,10 +23,23 @@ from api.records import (
     start_monitoring_episode,
     team_messages,
 )
+from api.messaging import patient_conversation, patient_provider_ids
 from api.goals import doctor_provider_goals
 from api.logs import lifestyle_logs
-from api.patients import authorized_patient_ids, patient_list
-from api.views import change_password
+from api.patients import (
+    archive_patient,
+    authorized_patient_ids,
+    patient_list,
+    reactivate_patient,
+)
+from api.personal_goals import personal_goal_detail, personal_goals
+from api.views import (
+    change_password,
+    login,
+    register_doctor,
+    request_password_change_code,
+    verify_password_change_code,
+)
 
 
 class PatientProfileValueTests(SimpleTestCase):
@@ -577,7 +593,7 @@ class ChangePasswordApiTests(SimpleTestCase):
             patch("api.views.UserAccount.objects.filter") as filter_accounts,
         ):
             response = self.request(
-                "patient",
+                "doctor",
                 {"currentPassword": "incorrect", "newPassword": "new-password"},
             )
 
@@ -738,3 +754,542 @@ class AuthAndIsolationApiTests(SimpleTestCase):
         self.assertIn("managing_doctor_id", condition)
         self.assertIn("All Doctors", condition)
         self.assertIn("Selected Doctors", condition)
+
+
+class TemporaryPasswordEnforcementTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.account = SimpleNamespace(
+            id=12,
+            role="patient",
+            is_temporary_password=True,
+        )
+
+    def authenticate_path(self, path):
+        request = self.factory.get(path, HTTP_AUTHORIZATION="Bearer test-token")
+        with (
+            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": "patient"}),
+            patch("api.authentication.UserAccount.objects.get", return_value=self.account),
+        ):
+            return VitalSyncJWTAuthentication().authenticate(request)
+
+    def test_temporary_patient_token_is_denied_for_patient_resources(self):
+        request = self.factory.get(
+            "/api/patient/profile",
+            HTTP_AUTHORIZATION="Bearer test-token",
+        )
+        with (
+            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": "patient"}),
+            patch("api.authentication.UserAccount.objects.get", return_value=self.account),
+            self.assertRaises(PermissionDenied),
+        ):
+            VitalSyncJWTAuthentication().authenticate(request)
+
+    def test_temporary_patient_can_only_reach_session_and_password_setup_routes(self):
+        for path in (
+            "/api/auth/me",
+            "/api/auth/change-password/code",
+            "/api/auth/change-password/verify",
+            "/api/auth/change-password",
+        ):
+            with self.subTest(path=path):
+                account, _ = self.authenticate_path(path)
+                self.assertIs(account, self.account)
+
+    def test_regular_patient_can_reach_protected_resources(self):
+        self.account.is_temporary_password = False
+        account, _ = self.authenticate_path("/api/patient/profile")
+        self.assertIs(account, self.account)
+
+
+class PasswordChangeVerificationApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.now = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
+        self.patient = SimpleNamespace(
+            id=12,
+            role="patient",
+            email="patient@example.test",
+            password_hash="old-hash",
+            is_temporary_password=True,
+            is_authenticated=True,
+        )
+        self.verification = SimpleNamespace(
+            code_hash="encoded-code",
+            requested_at=self.now - timedelta(minutes=2),
+            expires_at=self.now + timedelta(minutes=8),
+            attempts=0,
+            verified_at=None,
+            save=Mock(),
+            delete=Mock(),
+        )
+
+    def request(self, view, path, data=None):
+        request = self.factory.post(path, data=data or {}, format="json")
+        force_authenticate(request, user=self.patient)
+        return view(request)
+
+    def test_email_code_is_sent_and_stored_without_returning_the_code(self):
+        queryset = Mock()
+        queryset.first.return_value = None
+        mail = Mock()
+        with (
+            patch("api.views.settings.EMAIL_HOST", "smtp.example.test"),
+            patch("api.views.settings.EMAIL_HOST_USER", "mailer@example.test"),
+            patch("api.views.settings.EMAIL_HOST_PASSWORD", "configured"),
+            patch("api.views.timezone.now", return_value=self.now),
+            patch("api.views.secrets.randbelow", return_value=42),
+            patch("api.views.make_password", return_value="encoded-code"),
+            patch("api.views.PasswordChangeVerification.objects.filter", return_value=queryset),
+            patch("api.views.PasswordChangeVerification.objects.update_or_create") as save_code,
+            patch("api.views.EmailMessage", return_value=mail) as email_message,
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            response = self.request(request_password_change_code, "/api/auth/change-password/code")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("000042", str(response.data))
+        save_code.assert_called_once_with(
+            user_id=12,
+            defaults={
+                "code_hash": "encoded-code",
+                "requested_at": self.now,
+                "expires_at": self.now + timedelta(minutes=10),
+                "attempts": 0,
+                "verified_at": None,
+            },
+        )
+        email_message.assert_called_once()
+        self.assertEqual(email_message.call_args.kwargs["to"], ["patient@example.test"])
+        self.assertIn("000042", email_message.call_args.kwargs["body"])
+        mail.send.assert_called_once_with(fail_silently=False)
+
+    def test_verified_email_code_allows_password_change_and_clears_temporary_status(self):
+        lock_manager = Mock()
+        lock_manager.filter.return_value.first.return_value = self.verification
+        with (
+            patch("api.views.timezone.now", return_value=self.now),
+            patch("api.views.check_password", return_value=True),
+            patch("api.views.PasswordChangeVerification.objects.select_for_update", return_value=lock_manager),
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            verify_response = self.request(
+                verify_password_change_code,
+                "/api/auth/change-password/verify",
+                {"code": "123456"},
+            )
+
+        self.assertEqual(verify_response.status_code, 200)
+        self.assertEqual(self.verification.verified_at, self.now)
+
+        lock_manager.filter.return_value.first.return_value = self.verification
+        account_query = Mock()
+        with (
+            patch("api.views.timezone.now", return_value=self.now),
+            patch("api.views.bcrypt.hashpw", return_value=b"new-password-hash"),
+            patch("api.views.bcrypt.gensalt", return_value=b"salt"),
+            patch("api.views.PasswordChangeVerification.objects.select_for_update", return_value=lock_manager),
+            patch("api.views.UserAccount.objects.filter", return_value=account_query) as filter_accounts,
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            change_response = self.request(
+                change_password,
+                "/api/auth/change-password",
+                {"newPassword": "updated-pass"},
+            )
+
+        self.assertEqual(change_response.status_code, 200)
+        filter_accounts.assert_called_once_with(id=12, role="patient")
+        account_query.update.assert_called_once_with(
+            password_hash="new-password-hash",
+            is_temporary_password=False,
+        )
+        self.verification.delete.assert_called_once_with()
+
+    def test_patient_cannot_set_password_before_verifying_code(self):
+        self.verification.verified_at = None
+        lock_manager = Mock()
+        lock_manager.filter.return_value.first.return_value = self.verification
+        with (
+            patch("api.views.timezone.now", return_value=self.now),
+            patch("api.views.PasswordChangeVerification.objects.select_for_update", return_value=lock_manager),
+            patch("api.views.UserAccount.objects.filter") as filter_accounts,
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            response = self.request(
+                change_password,
+                "/api/auth/change-password",
+                {"newPassword": "updated-pass"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        filter_accounts.assert_not_called()
+
+
+class ContractAcceptanceApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def authenticated_request(self, path, method="post", data=None, role="doctor"):
+        request = getattr(self.factory, method)(path, data=data, format="json")
+        force_authenticate(
+            request,
+            user=SimpleNamespace(id=9, role=role, is_authenticated=True),
+        )
+        return request
+
+    def test_doctor_registration_creates_doctor_account_and_profile(self):
+        account = SimpleNamespace(
+            id=17,
+            email="doctor@example.test",
+            role="doctor",
+            is_temporary_password=False,
+            created_at=None,
+        )
+        profile = SimpleNamespace(
+            name="Jamie Dizon",
+            specialty="Cardiology",
+            initials="JD",
+            display_color="#d9ecf1",
+        )
+        profile_query = Mock()
+        profile_query.first.return_value = profile
+        with (
+            patch("api.views.bcrypt.hashpw", return_value=b"hashed"),
+            patch("api.views.bcrypt.gensalt", return_value=b"salt"),
+            patch("api.views.UserAccount.objects.create", return_value=account) as create_account,
+            patch("api.views.DoctorProfile.objects.create") as create_profile,
+            patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+            patch("jwt.encode", return_value="signed-token"),
+        ):
+            response = register_doctor(
+                self.authenticated_request(
+                    "/api/auth/register-doctor",
+                    data={
+                        "name": " Jamie Dizon ",
+                        "email": "DOCTOR@example.test",
+                        "password": "strong-pass",
+                        "specialty": "Cardiology",
+                    },
+                )
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["user"]["role"], "doctor")
+        create_account.assert_called_once_with(
+            email="doctor@example.test",
+            password_hash="hashed",
+            role="doctor",
+            is_temporary_password=False,
+        )
+        create_profile.assert_called_once()
+
+    def test_doctor_login_returns_a_signed_token_and_role(self):
+        account = SimpleNamespace(
+            id=17,
+            email="doctor@example.test",
+            password_hash="stored-hash",
+            role="doctor",
+            is_temporary_password=False,
+            created_at=None,
+        )
+        profile_query = Mock()
+        profile_query.first.return_value = SimpleNamespace(
+            name="Jamie Dizon",
+            specialty="Cardiology",
+            initials="JD",
+            display_color="#d9ecf1",
+        )
+        request = self.factory.post(
+            "/api/auth/login",
+            data={"email": " DOCTOR@example.test ", "password": "strong-pass"},
+            format="json",
+        )
+        with (
+            patch("api.views.UserAccount.objects.filter") as filter_accounts,
+            patch("api.views.bcrypt.checkpw", return_value=True) as check_password,
+            patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
+            patch("jwt.encode", return_value="signed-token"),
+        ):
+            filter_accounts.return_value.first.return_value = account
+            response = login(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["token"], "signed-token")
+        self.assertEqual(response.data["user"]["role"], "doctor")
+        check_password.assert_called_once_with(b"strong-pass", b"stored-hash")
+
+    def test_doctor_patient_provisioning_sets_temporary_password_and_managing_doctor(self):
+        doctor = SimpleNamespace(id=17, user_id=9, name="Dr. Example")
+        account = SimpleNamespace(
+            id=42,
+            email="patient@example.test",
+            role="patient",
+            is_temporary_password=True,
+            created_at=self_now(),
+        )
+        patient = SimpleNamespace(
+            id=42,
+            user_id=42,
+            user=account,
+            unique_id="VS-0042",
+            name="Patient Example",
+            phone=None,
+            care_focus="General lifestyle care",
+            patient_type="Out-patient",
+            status="On track",
+            priority="Medium",
+            follow_up_date=date(2026, 10, 12),
+            monitoring_active=True,
+            date_of_birth=None,
+        )
+        relation = SimpleNamespace(
+            visibility="Assigned Only",
+            selected_doctor_ids=[],
+            managing_doctor=doctor,
+        )
+        relation_query = Mock()
+        relation_query.select_related.return_value.first.return_value = relation
+        preference_query = Mock()
+        preference_query.first.return_value = None
+        mail = Mock()
+        with (
+            patch("api.patients.get_doctor_profile", return_value=doctor),
+            patch("api.patients.AccountPreference.objects.filter", return_value=preference_query),
+            patch("api.patients.UserAccount.objects.create", return_value=account) as create_account,
+            patch("api.patients.PatientProfile.objects.create", return_value=patient),
+            patch("api.patients.MonitoringRelationship.objects.create") as create_relationship,
+            patch("api.patients.MonitoringRelationship.objects.filter", return_value=relation_query),
+            patch("api.patients.bcrypt.hashpw", return_value=b"temporary-hash"),
+            patch("api.patients.bcrypt.gensalt", return_value=b"salt"),
+            patch("api.patients.settings.EMAIL_HOST", "smtp.example.test"),
+            patch("api.patients.settings.EMAIL_HOST_USER", "mailer@example.test"),
+            patch("api.patients.settings.EMAIL_HOST_PASSWORD", "configured"),
+            patch("api.patients.EmailMessage", return_value=mail),
+            patch("api.patients.transaction.atomic", return_value=nullcontext()),
+            patch("api.records.start_monitoring_episode"),
+        ):
+            response = patient_list(
+                self.authenticated_request(
+                    "/api/patients",
+                    data={"email": "PATIENT@example.test", "name": "Patient Example"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 201)
+        create_account.assert_called_once()
+        self.assertTrue(create_account.call_args.kwargs["is_temporary_password"])
+        create_relationship.assert_called_once_with(
+            patient=patient,
+            managing_doctor=doctor,
+            visibility="Assigned Only",
+            selected_doctor_ids=[],
+        )
+        mail.send.assert_called_once_with(fail_silently=False)
+
+    def test_selected_doctors_visibility_includes_the_managing_doctor(self):
+        patient = SimpleNamespace(id=42, monitoring_active=True)
+        relationship = SimpleNamespace(
+            visibility="Selected Doctors",
+            managing_doctor_id=17,
+            selected_doctor_ids=[18],
+        )
+        relationship_query = Mock()
+        relationship_query.first.return_value = relationship
+        doctor_query = Mock()
+        with (
+            patch("api.messaging.MonitoringRelationship.objects.filter", return_value=relationship_query),
+            patch("api.messaging.DoctorProfile.objects.filter", return_value=doctor_query) as filter_doctors,
+        ):
+            result = patient_provider_ids(patient)
+
+        self.assertIs(result, doctor_query)
+        self.assertEqual(filter_doctors.call_args.kwargs["id__in"], {17, 18})
+
+    def test_archiving_and_reactivating_monitoring_preserves_the_patient_account(self):
+        doctor = SimpleNamespace(id=17)
+        patient = SimpleNamespace(
+            id=42,
+            monitoring_active=True,
+            save=Mock(),
+        )
+        request = self.authenticated_request("/api/patients/42/archive")
+        with (
+            patch("api.patients.get_managed_patient", return_value=(doctor, patient, None)),
+            patch("api.patients.transaction.atomic", return_value=nullcontext()),
+            patch("api.records.end_monitoring_episode") as end_episode,
+            patch("api.patients.serialize_patient", return_value={"id": 42}),
+        ):
+            archived = archive_patient(request, patient_id=42)
+
+        self.assertEqual(archived.status_code, 200)
+        self.assertFalse(patient.monitoring_active)
+        end_episode.assert_called_once_with(patient)
+        patient.save.assert_called_once_with(update_fields=["monitoring_active"])
+
+        patient.monitoring_active = False
+        patient.save.reset_mock()
+        request = self.authenticated_request(
+            "/api/patients/reactivate",
+            data={"uniqueId": "VS-0042"},
+        )
+        patient_lookup = Mock()
+        patient_lookup.first.return_value = patient
+        with (
+            patch("api.patients.PatientProfile.objects.filter", return_value=patient_lookup),
+            patch("api.patients.get_managed_patient", return_value=(doctor, patient, None)),
+            patch("api.patients.get_doctor_profile", return_value=doctor),
+            patch("api.patients.transaction.atomic", return_value=nullcontext()),
+            patch("api.records.start_monitoring_episode") as start_episode,
+            patch("api.patients.serialize_patient", return_value={"id": 42}),
+        ):
+            reactivated = reactivate_patient(request)
+
+        self.assertEqual(reactivated.status_code, 200)
+        self.assertTrue(patient.monitoring_active)
+        patient.save.assert_called_once_with(update_fields=["monitoring_active"])
+        start_episode.assert_called_once_with(patient, doctor)
+
+    def test_personal_goal_lookup_is_scoped_to_its_patient_owner(self):
+        patient_query = Mock()
+        patient_query.first.return_value = SimpleNamespace(id=5)
+        goal_query = Mock()
+        goal_query.select_related.return_value.first.return_value = None
+        request = self.authenticated_request(
+            "/api/personal-goals/99",
+            method="patch",
+            data={"status": "Completed"},
+            role="patient",
+        )
+        with (
+            patch("api.personal_goals.PatientProfile.objects.filter", return_value=patient_query),
+            patch("api.personal_goals.PersonalGoal.objects.filter", return_value=goal_query) as filter_goals,
+        ):
+            response = personal_goal_detail(request, goal_id=99)
+
+        self.assertEqual(response.status_code, 404)
+        filter_goals.assert_called_once_with(id=99, patient_id=5)
+
+    def test_doctor_provider_goal_is_assigned_to_the_authenticated_doctor(self):
+        doctor = SimpleNamespace(id=17, name="Dr. Example")
+        patient = SimpleNamespace(id=42, monitoring_active=True)
+        goal = {
+            "title": "Walk regularly",
+            "category": "Activity",
+            "target": "30 minutes",
+            "frequency": "Daily",
+            "startDate": "2026-10-05",
+            "reviewDate": "2026-10-12",
+            "status": "Active",
+            "evaluationType": "duration",
+            "targetValue": 30,
+            "metricKey": "activity",
+        }
+        request = self.authenticated_request(
+            "/api/patients/42/provider-goals",
+            method="put",
+            data={"goals": [goal]},
+        )
+        refreshed_goals = Mock()
+        refreshed_goals.select_related.return_value.order_by.return_value = []
+        with (
+            patch("api.goals.get_doctor_patient", return_value=(doctor, patient)),
+            patch("api.goals.ProviderGoal.objects.filter", side_effect=[[], refreshed_goals]),
+            patch("api.goals.ProviderGoal.objects.create") as create_goal,
+            patch("api.goals.transaction.atomic", return_value=nullcontext()),
+        ):
+            response = doctor_provider_goals(request, patient_id=42)
+
+        self.assertEqual(response.status_code, 200)
+        create_goal.assert_called_once()
+        self.assertIs(create_goal.call_args.kwargs["assigned_by_doctor"], doctor)
+        self.assertIs(create_goal.call_args.kwargs["patient"], patient)
+
+    def test_doctor_cannot_read_or_create_patient_personal_goals(self):
+        request = self.authenticated_request(
+            "/api/personal-goals",
+            method="get",
+            role="doctor",
+        )
+        with patch("api.personal_goals.PersonalGoal.objects.filter") as filter_goals:
+            response = personal_goals(request)
+
+        self.assertEqual(response.status_code, 403)
+        filter_goals.assert_not_called()
+
+    def test_patient_message_can_only_be_created_for_an_authorized_provider(self):
+        patient = SimpleNamespace(id=42)
+        doctor = SimpleNamespace(id=17)
+        providers = Mock()
+        providers.filter.return_value.first.return_value = doctor
+        message = SimpleNamespace(
+            id=7,
+            sender_role="patient",
+            text="Hello care team",
+            is_important=False,
+            created_at=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        )
+        request = self.authenticated_request(
+            "/api/messages/17",
+            data={"text": "  Hello care team  ", "important": False},
+            role="patient",
+        )
+        with (
+            patch("api.messaging.PatientProfile.objects.filter") as patients,
+            patch("api.messaging.patient_provider_ids", return_value=providers),
+            patch("api.messaging.PatientMessage.objects.create", return_value=message) as create_message,
+        ):
+            patients.return_value.first.return_value = patient
+            response = patient_conversation(request, doctor_id=17)
+
+        self.assertEqual(response.status_code, 201)
+        create_message.assert_called_once_with(
+            patient=patient,
+            doctor=doctor,
+            sender_role="patient",
+            text="Hello care team",
+            is_important=False,
+        )
+
+    def test_lifestyle_log_response_preserves_the_structured_payload(self):
+        patient = SimpleNamespace(id=42, unique_id="VS-0042")
+        payload = {"activity": "Walking", "minutes": 35}
+        log = SimpleNamespace(
+            id=8,
+            patient_id=42,
+            patient=patient,
+            type="activity",
+            date=date(2026, 10, 5),
+            time="10:15",
+            title="Walking",
+            detail="display-only text",
+            extra="",
+            payload=payload,
+        )
+        request = self.authenticated_request(
+            "/api/logs",
+            data={
+                "type": "activity",
+                "date": "2026-10-05",
+                "time": "10:15",
+                "title": "Walking",
+                "detail": "display-only text",
+                "payload": payload,
+            },
+            role="patient",
+        )
+        with (
+            patch("api.logs.PatientProfile.objects.filter") as patients,
+            patch("api.logs.LifestyleLog.objects.create", return_value=log) as create_log,
+        ):
+            patients.return_value.first.return_value = patient
+            response = lifestyle_logs(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["log"]["payload"], payload)
+        create_log.assert_called_once()
+
+
+def self_now():
+    return datetime(2026, 10, 5, tzinfo=timezone.utc)

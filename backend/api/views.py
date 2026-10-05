@@ -1,15 +1,25 @@
+import logging
 import re
+import secrets
+import smtplib
+from datetime import timedelta
 
 import bcrypt
+from django.contrib.auth.hashers import check_password, make_password
+from django.conf import settings
+from django.core.mail import EmailMessage
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.http import JsonResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from django.views.decorators.http import require_GET
 
-from api.models import DoctorProfile, PatientProfile, UserAccount
+from api.models import DoctorProfile, PasswordChangeVerification, PatientProfile, UserAccount
+
+logger = logging.getLogger(__name__)
 
 
 @require_GET
@@ -150,16 +160,112 @@ def current_user(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def request_password_change_code(request):
+    account = request.user
+    if account.role != "patient":
+        return Response({"message": "Patient account required."}, status=status.HTTP_403_FORBIDDEN)
+    if not all((settings.EMAIL_HOST, settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD)):
+        return Response(
+            {"message": "Email verification is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    now = timezone.now()
+    verification = PasswordChangeVerification.objects.filter(user_id=account.id).first()
+    if verification and verification.requested_at > now - timedelta(seconds=60):
+        return Response(
+            {"message": "Please wait before requesting another verification code."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    try:
+        with transaction.atomic():
+            PasswordChangeVerification.objects.update_or_create(
+                user_id=account.id,
+                defaults={
+                    "code_hash": make_password(code),
+                    "requested_at": now,
+                    "expires_at": now + timedelta(minutes=10),
+                    "attempts": 0,
+                    "verified_at": None,
+                },
+            )
+            EmailMessage(
+                subject="Your VitalSync password-change verification code",
+                body=(
+                    f"Your one-time verification code is {code}.\n\n"
+                    "This code expires in 10 minutes. If you did not request this "
+                    "change, you can ignore this email."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[account.email],
+            ).send(fail_silently=False)
+    except (OSError, smtplib.SMTPException):
+        logger.exception("Password-change verification email could not be sent")
+        return Response(
+            {"message": "Could not send the verification code. Please try again later."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    return Response({"message": "A verification code was sent to your registered email."})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def verify_password_change_code(request):
+    account = request.user
+    if account.role != "patient":
+        return Response({"message": "Patient account required."}, status=status.HTTP_403_FORBIDDEN)
+
+    code = request.data.get("code")
+    if not isinstance(code, str) or not re.fullmatch(r"\d{6}", code):
+        return Response(
+            {"message": "Enter the six-digit verification code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    now = timezone.now()
+    with transaction.atomic():
+        verification = (
+            PasswordChangeVerification.objects.select_for_update()
+            .filter(user_id=account.id)
+            .first()
+        )
+        if not verification or verification.expires_at <= now:
+            return Response(
+                {"message": "The verification code is missing or expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if verification.attempts >= 5:
+            return Response(
+                {"message": "Too many incorrect attempts. Request a new code."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if not check_password(code, verification.code_hash):
+            verification.attempts += 1
+            verification.save(update_fields=["attempts"])
+            return Response(
+                {"message": "The verification code is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        verification.verified_at = now
+        verification.save(update_fields=["verified_at"])
+
+    return Response({"message": "Verification code accepted."})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def change_password(request):
     account = request.user
     if account.role not in {"doctor", "patient"}:
         return Response({"message": "Supported account required."}, status=status.HTTP_403_FORBIDDEN)
 
-    current_password = request.data.get("currentPassword")
     new_password = request.data.get("newPassword")
-    if not isinstance(current_password, str) or not isinstance(new_password, str):
+    if not isinstance(new_password, str):
         return Response(
-            {"message": "Current and new passwords are required."},
+            {"message": "A new password is required."},
             status=status.HTTP_400_BAD_REQUEST,
         )
     if len(new_password) < 8:
@@ -167,15 +273,44 @@ def change_password(request):
             {"message": "New password must be at least 8 characters."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    if not bcrypt.checkpw(current_password.encode(), account.password_hash.encode()):
-        return Response(
-            {"message": "Current password is incorrect."},
-            status=status.HTTP_400_BAD_REQUEST,
+    if account.role == "doctor":
+        current_password = request.data.get("currentPassword")
+        if not isinstance(current_password, str):
+            return Response(
+                {"message": "Current password is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not bcrypt.checkpw(current_password.encode(), account.password_hash.encode()):
+            return Response(
+                {"message": "Current password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        UserAccount.objects.filter(id=account.id, role="doctor").update(
+            password_hash=bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode(),
+            is_temporary_password=False,
         )
+        return Response({"message": "Password updated successfully."})
 
-    password_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
-    UserAccount.objects.filter(id=account.id, role=account.role).update(
-        password_hash=password_hash,
-        is_temporary_password=False,
-    )
+    now = timezone.now()
+    with transaction.atomic():
+        verification = (
+            PasswordChangeVerification.objects.select_for_update()
+            .filter(user_id=account.id)
+            .first()
+        )
+        if (
+            not verification
+            or verification.verified_at is None
+            or verification.expires_at <= now
+        ):
+            return Response(
+                {"message": "Verify the email code before setting a new password."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        UserAccount.objects.filter(id=account.id, role="patient").update(
+            password_hash=bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode(),
+            is_temporary_password=False,
+        )
+        verification.delete()
+
     return Response({"message": "Password updated successfully."})

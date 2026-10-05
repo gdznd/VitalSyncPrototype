@@ -1,3 +1,5 @@
+import { getActivityMinutes, getMedicationNames, getSleepMinutes } from './logMetrics';
+
 export type EvaluationType = 'duration' | 'indicator' | 'occurrence' | 'reflection' | 'none';
 export type GoalFrequency = 'Daily' | 'Weekdays' | 'Weekly';
 
@@ -23,6 +25,7 @@ export interface HealthLog {
   title: string;
   detail: string;
   extra?: string;
+  payload?: Record<string, unknown> | null;
 }
 
 export interface EvaluationResult {
@@ -32,21 +35,6 @@ export interface EvaluationResult {
   percentage: number;
   progressText: string;
   statusReason: string;
-}
-
-function parseMinutes(detail: string): number {
-  const minutes = detail.match(/(\d+)\s*minutes?/i);
-  const hours = detail.match(/(\d+)\s*hr/i);
-  return (minutes ? parseInt(minutes[1], 10) : 0)
-    + (hours ? parseInt(hours[1], 10) * 60 : 0)
-    || parseInt(detail, 10)
-    || 0;
-}
-
-function parseSleepHours(extra: string): number {
-  const match = extra.match(/(\d+)h\s*(\d+)?m?/i);
-  if (!match) return 8;
-  return parseInt(match[1], 10) + (match[2] ? parseInt(match[2], 10) / 60 : 0);
 }
 
 export function evaluateGoal(
@@ -116,7 +104,7 @@ export function evaluateGoal(
     if (evalType === 'duration' && goal.metricKey === 'activity') {
       const totalMinutes = eligibleLogs
         .filter((log) => log.type === 'activity')
-        .reduce((sum, log) => sum + parseMinutes(log.detail), 0);
+        .reduce((sum, log) => sum + (getActivityMinutes(log.payload) ?? 0), 0);
       totalAchieved = Math.min(expectedTotal, Math.floor(totalMinutes / (goal.targetValue || 30)));
     } else {
       totalAchieved = eligibleLogs.filter((log) => {
@@ -125,7 +113,8 @@ export function evaluateGoal(
           evalType === 'occurrence'
           && log.type === 'medication'
           && goal.metricKey
-          && log.detail.toLowerCase().includes(goal.metricKey.toLowerCase())
+          && getMedicationNames(log.payload)
+            .some((name) => name.toLowerCase().includes((goal.metricKey || '').toLowerCase()))
         ) return true;
         return evalType === 'reflection' && Boolean(goal.metricKey) && log.type === goal.metricKey;
       }).length;
@@ -164,11 +153,12 @@ export function evaluateGoal(
       if (goal.metricKey === 'activity') {
         const totalMinutes = dayLogs
           .filter((log) => log.type === 'activity')
-          .reduce((sum, log) => sum + parseMinutes(log.detail), 0);
+          .reduce((sum, log) => sum + (getActivityMinutes(log.payload) ?? 0), 0);
         met = totalMinutes >= (goal.targetValue || 30);
       } else if (goal.metricKey === 'sleep') {
         const sleepLog = dayLogs.find((log) => log.type === 'sleep');
-        met = Boolean(sleepLog?.extra && parseSleepHours(sleepLog.extra) >= (goal.targetValue || 7));
+        const sleepMinutes = getSleepMinutes(sleepLog?.payload);
+        met = sleepMinutes !== null && sleepMinutes >= (goal.targetValue || 7) * 60;
       }
     } else if (evalType === 'indicator') {
       met = (goal.metricKey === 'food' || goal.category === 'Nutrition')
@@ -177,7 +167,8 @@ export function evaluateGoal(
       const metricKey = goal.metricKey.toLowerCase();
       met = dayLogs.some(
         (log) => log.type === 'medication'
-          && log.detail.toLowerCase().includes(metricKey),
+          && getMedicationNames(log.payload)
+            .some((name) => name.toLowerCase().includes(metricKey)),
       );
     } else if (evalType === 'reflection' && goal.metricKey) {
       met = dayLogs.some((log) => log.type === goal.metricKey);

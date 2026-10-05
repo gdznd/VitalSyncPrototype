@@ -24,6 +24,20 @@ class UserAccount(models.Model):
         db_table = "users"
 
 
+class PasswordChangeVerification(models.Model):
+    id = models.AutoField(primary_key=True)
+    user = models.OneToOneField(UserAccount, models.CASCADE, db_column="user_id")
+    code_hash = models.CharField(max_length=255)
+    requested_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    verified_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "password_change_verifications"
+
+
 class DoctorProfile(models.Model):
     id = models.AutoField(primary_key=True)
     user = models.ForeignKey(UserAccount, models.DO_NOTHING, blank=True, null=True)

@@ -10,7 +10,15 @@ from api.messaging import doctor_patient_conversation, patient_conversation, pat
 from api.profiles import change_patient_email, doctor_profile, patient_profile
 from api.preferences import account_preferences, conversation_preferences
 from api.records import doctor_note_detail, doctor_notes, doctor_reminders, monitoring_history, patient_reminder, team_messages
-from api.views import change_password, current_user, health_check, login, register_doctor
+from api.views import (
+    change_password,
+    current_user,
+    health_check,
+    login,
+    register_doctor,
+    request_password_change_code,
+    verify_password_change_code,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -19,6 +27,8 @@ urlpatterns = [
     path("api/auth/register-doctor", register_doctor, name="register-doctor"),
     path("api/auth/me", current_user, name="current-user"),
     path("api/auth/change-password", change_password, name="change-password"),
+    path("api/auth/change-password/code", request_password_change_code, name="password-change-code"),
+    path("api/auth/change-password/verify", verify_password_change_code, name="password-change-verify"),
     path("api/patient/profile", patient_profile, name="patient-profile"),
     path("api/patient/account/email", change_patient_email, name="patient-change-email"),
     path("api/doctor/profile", doctor_profile, name="doctor-profile"),

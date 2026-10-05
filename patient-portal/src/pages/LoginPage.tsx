@@ -45,7 +45,6 @@ export function LoginPage({ onLogin }: { onLogin: (user: PatientAuthUser) => voi
             <label>
               <input type="checkbox" /> <span>Remember me</span>
             </label>
-            <a href="#forgot-password">Forgot password?</a>
           </div>
           {error && <p className="login-error" role="alert">{error}</p>}
           <button type="submit" className="primary-button login-submit" disabled={submitting}>{submitting ? 'Signing in...' : 'Log in'}</button>
