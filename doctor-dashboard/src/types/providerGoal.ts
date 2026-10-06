@@ -1,4 +1,4 @@
-import type { EvaluationType, GoalFrequency } from '../lib/goalEvaluator'
+import type { EvaluationType, GoalFrequency } from '../../../shared/goalEvaluator'
 
 export type ProviderGoal = {
   id: number

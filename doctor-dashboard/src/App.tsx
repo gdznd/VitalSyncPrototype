@@ -9,6 +9,7 @@ import { DoctorSettingsPage } from './components/DoctorSettingsPage'
 import { LoginPage } from './components/LoginPage'
 type Doctor = { id: number; name: string; initials: string; color?: string; specialty?: string; isCurrent?: boolean }
 import type { DoctorNoteDto, DoctorProfileDto, MonitoringHistoryEpisodeDto, PatientConversationMessage, TeamMessageDto } from './lib/api'
+import DoctorPicker from './components/DoctorPicker'
 import RecentActivitySummary from './components/RecentActivitySummary'
 import { evaluateGoal, type EvaluationType, type GoalFrequency } from '../../shared/goalEvaluator'
 

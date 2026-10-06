@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Patient } from '../types/patient'
 import type { ProviderGoal } from '../types/providerGoal'
-import { evaluateGoal, type GoalFrequency } from '../lib/goalEvaluator'
+import { evaluateGoal, type GoalFrequency } from '../../../shared/goalEvaluator'
 
 const providerGoalTemplates = [
   { id: 'eat-veg', title: 'Eat more vegetables', category: 'Nutrition', target: '1 serving', frequency: 'Daily', evaluationType: 'indicator' as const, targetValue: 1, metricKey: 'food' },
