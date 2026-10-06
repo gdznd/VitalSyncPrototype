@@ -101,7 +101,27 @@ Before an explicitly approved deployment:
 4. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for patient invitations and password-change verification email.
 5. Review `manage.py migrate --plan`, back up any existing database, and apply Django migrations only after approval.
 
-No Supabase database has been migrated or deployed as part of this revision.
+**Current status (development Supabase project, empty/synthetic data only):**
+
+- IMPLEMENTED: a Supabase project hosts the development PostgreSQL database. Django connects through the Session pooler (port 5432, `sslmode=require`) and migrations `api` 0000 (squashed), 0007 and 0008 are applied. Doctor registration and patient creation with an invitation email (Ethereal test SMTP) were exercised against it.
+- NOT YET VERIFIED: the full browser workflow (logs, goals, messaging, visibility, archive/reactivate) against Supabase.
+- NOT DONE: the Supabase database password was exposed during setup and must be reset, then `DATABASE_URL` updated. `DJANGO_SECRET_KEY` and `JWT_SECRET` are still placeholders. No hosted Django/frontend deployment exists; the backend runs locally.
+- The previous local PostgreSQL database was not migrated into Supabase (fresh start); a local backup exists outside the repository.
+- No real participant data is stored. Real data requires the ethics and research-ready requirements above.
+
+### Connecting a new device to the shared Supabase database
+
+The database lives online, so a new device only needs the code and the connection details. Do not run a new Supabase setup or create another project.
+
+1. Clone the repository and check out `test-branch`.
+2. In `backend/`, create the virtual environment and install dependencies:
+   `py -3.12 -m venv .venv-win`, then `.\.venv-win\Scripts\python.exe -m pip install -r requirements.txt`.
+3. Copy `backend/.env.example` to `backend/.env`. `.env` is gitignored, so it never comes with the clone.
+4. Get the `DATABASE_URL` (Supabase Session pooler, port 5432, ending in `?sslmode=require`) and the SMTP settings from the project owner through a private channel. Do not commit them, paste them into chats, or share screenshots of them.
+5. Do **not** run `manage.py migrate` unless a new migration was added. The tables already exist on Supabase. Check with `manage.py migrate --plan`; it should report nothing to apply.
+6. Run `manage.py check`, then `manage.py runserver 127.0.0.1:8000`, then start both frontends as described in Daily startup.
+
+Everyone using the same `DATABASE_URL` shares the same data. If the Supabase password is reset, every device must update its `.env`. Supabase free-tier projects may require the connecting network to allow outbound port 5432.
 
 ## Daily startup
 
