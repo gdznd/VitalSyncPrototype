@@ -39,7 +39,7 @@ Never blur these states together. Ordinary coding discussion and conversation do
 ### Applications and data
 
 - **Patient side:** `patient-portal/`. React 18 + TypeScript + Vite, configured as an installable PWA (`vite-plugin-pwa`), with `react-router-dom`.
-- **Doctor side:** `doctor-dashboard/`. React 19 + TypeScript + Vite web dashboard. Most of its logic is in `src/App.tsx`.
+- **Doctor side:** `doctor-dashboard/`. React 19 + TypeScript + Vite web dashboard. Component responsibilities have been modularized (Patient Workspace, Goals, Messages, Team Messages, and Profile extracted).
 - **Backend:** a V1 Django REST Framework API backed by PostgreSQL is implemented in `backend/`. Both frontends use JWT-authenticated API flows for core connected workflows. This is an interview-prototype integration, not a production healthcare system.
 - **Authentication:** the backend authenticates doctor and patient accounts, stores bcrypt password hashes, and requires temporary-password patients to change their password. Patient account invitations use email. Doctors self-register through the existing dashboard flow; general password recovery is outside the MVP.
 - **Shared data:** connected logs, goals, messages, patient registry, monitoring relationships/history, doctor notes, and existing account/conversation preferences are persisted through the backend. Built-in activity choices are served by the API and custom activity choices are patient-owned backend records. Consult `BACKEND_Implementation.md` for remaining browser and full-workflow verification.

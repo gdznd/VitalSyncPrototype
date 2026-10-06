@@ -86,13 +86,7 @@ export default function SummaryPage() {
 
   const historyForSelected = selectedDate ? filtered.filter(l => l.date === selectedDate) : [];
 
-  const observations: string[] = [];
-  if (mealsLogged >= Math.max(1, daysCount)) observations.push("You've been consistently logging your meals. Great job!");
-  if (activityMinutes > 0) observations.push("You've recorded several physical activities this period. Keep moving!");
-  if (filtered.some(l => l.type === 'stress' || l.type === 'social')) observations.push("Thank you for taking time to reflect on your wellbeing.");
-  if (sleepMinutesArr.length > 0) observations.push("Tracking your sleep is an important step toward healthier habits.");
-  if (medicationEntries > 0) observations.push("You've been keeping track of your medications consistently.");
-  if (observations.length === 0) observations.push('Start by adding your first health log today.');
+  const observations = useMemo(() => deriveJourneyObservations(filtered), [filtered]);
 
   return (
     <section className="summary-page">
@@ -177,22 +171,7 @@ export default function SummaryPage() {
         </div>
       </section>
 
-      <section className="journey-card">
-        <div className="section-header" style={{ marginBottom: '14px' }}>
-          <div>
-            <h3>🌱 Your Journey</h3>
-            <p>Personalized observations and reflections based on your recent activity.</p>
-          </div>
-        </div>
-        <div className="journey-items">
-          {observations.slice(0, 3).map((o, i) => (
-            <div key={i} className="journey-item">
-              <span className="journey-icon">✦</span>
-              <p>{o}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <YourJourney observations={observations} stressClassification={stressClassification} />
     </section>
   );
 }

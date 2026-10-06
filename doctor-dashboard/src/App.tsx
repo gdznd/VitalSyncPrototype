@@ -6,7 +6,6 @@ import './PrototypeExtras.addons.css'
 import { DoctorProfileCard } from './components/DoctorProfileCard'
 import { DoctorProfilePage } from './components/DoctorProfilePage'
 import { DoctorSettingsPage } from './components/DoctorSettingsPage'
-import DoctorPicker from './components/DoctorPicker'
 import { LoginPage } from './components/LoginPage'
 type Doctor = { id: number; name: string; initials: string; color?: string; specialty?: string; isCurrent?: boolean }
 import type { DoctorNoteDto, DoctorProfileDto, MonitoringHistoryEpisodeDto, PatientConversationMessage, TeamMessageDto } from './lib/api'

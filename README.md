@@ -7,7 +7,7 @@ VitalSync is an **interview-ready qualitative-research prototype** for a Lifesty
 
 The current system is a frontend prototype using mock/local data. A backend is being developed to provide authenticated identity, server-enforced authorization, persistent data, and shared data between the two applications.
 
-> **Prototype status:** Interview-ready frontend prototype → backend integration in progress  
+> **Prototype status:** Interview-ready frontend prototype (refactor complete) → backend implementation and integration as next phase
 > **Not production-ready:** VitalSync is not currently a production healthcare platform.
 
 ---
@@ -61,7 +61,7 @@ VitalSyncPrototype/
 - Provider-assigned goals
 - Personal Wellness Goals
 - Doctor/provider messaging
-- Provider profiles
+- Provider profiles (current prototype view; full capability pending backend integration per Feature Contract Matrix)
 - Patient profile and settings
 
 ---
@@ -109,7 +109,7 @@ The planned backend will become the shared source of truth for:
 - Personal goals
 - Messaging
 - Follow-ups
-- Provider profiles
+- Provider profiles (remaining backend/future capability per Feature Contract Matrix)
 - Archive/reactivation
 
 See [`BACKEND.md`](./BACKEND.md) for the backend implementation scope.

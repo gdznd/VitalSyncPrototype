@@ -176,8 +176,7 @@ Checklist
 ☐ ARCHITECTURE.md consistent with Feature Contract Matrix
 ☐ Approved feature gaps verified against current code
 ☐ No approved feature is removed or redefined by the refactor plan
-Status:
-In Progress — complete only after the final documentation/code consistency audit passes.
+Status: Complete — final documentation/code consistency audit and frontend refactor Phases 1–4 are complete.
 7. Phase 1 – Centralize Types
 Goal
 Remove duplicated interfaces from components.
@@ -388,17 +387,17 @@ Immediately after refactoring:
 Refactor Progress
 
 Update this section after each phase.
-Phase 0  ████████░░   80%
+Phase 0  ██████████   100%
 
-Phase 1  ░░░░░░░░░░   0%
+Phase 1  ██████████   100%
 
-Phase 2  ░░░░░░░░░░   0%
+Phase 2  ██████████   100%
 
-Phase 3  ░░░░░░░░░░   0%
+Phase 3  ██████████   100%
 
-Phase 4  ░░░░░░░░░░   0%
+Phase 4  ██████████   100%
 
-Phase 5  ░░░░░░░░░░   0%
+Phase 5  ██████████   100%
 
 Phase 6  ░░░░░░░░░░   0%
 

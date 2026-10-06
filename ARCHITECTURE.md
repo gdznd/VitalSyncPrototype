@@ -17,7 +17,7 @@ Future refactoring should preserve these architectural differences rather than f
 - Current iteration: Iteration 5 (Iteration 4 + S4 implementation)
 - Feature Freeze Status: ACTIVE
 - Prototype Completion Status: Core prototype substantially implemented; remaining approved feature gaps and backend/testing work are tracked in the Feature Contract Matrix.
-- Current Development Phase: Approved-feature verification and architecture stabilization, followed by frontend refactoring in preparation for backend integration.
+- Current Development Phase: Frontend refactor Phases 0–5 (including Phase 5 refactor validation and audit) completed; frontend architecture reviewed and confirmed READY FOR BACKEND.
 
 ## Current Objectives
 
@@ -26,8 +26,8 @@ The project has entered Feature Freeze following stakeholder consultation and ad
 Current priorities are:
 
 1. Complete remaining UI polish.
-2. Refactor the frontend architecture.
-3. Prepare the project for backend integration.
+2. Frontend refactor (Phases 1–4 complete).
+3. Backend implementation and integration.
 4. Preserve all approved workflows.
 
 No new features should be introduced without stakeholder approval.
@@ -47,7 +47,7 @@ Both applications are intentionally separated because they serve different user 
 - Major workflows: Patient registration, patient overview/workspace, message management, longitudinal history viewing.
 - State management: Local React `useState` in `App.tsx`.
 - Mock data: `initialPatients`, `doctors`, `activities`, and `monitoringHistory` (in `App.tsx`).
-- Current implementation status: Highly functional, but logic is tightly coupled in `App.tsx`.
+- Current implementation status: Highly functional; frontend refactoring (Phases 1–4: type, utility, shared component, Patient Workspace/Profile, Patient Goals, Patient Messages, and Team Messaging extraction) is complete, modularizing previous monolithic `App.tsx` responsibilities.
 
 # Patient Portal
 
@@ -361,25 +361,11 @@ The current architecture is functionally correct but contains several areas requ
 
 ## Monolithic App.tsx
 
-The largest source of technical debt is:
+The largest historical source of technical debt was:
 
 doctor-dashboard/src/App.tsx
 
-This file currently owns multiple responsibilities including:
-
-- Domain Model
-- Mock Database
-- Business Logic
-- Navigation Controller
-- Workflow Controller
-- Modal Controller
-- Patient Registry
-- Patient Workspace
-- Messaging
-- Monitoring History
-- Shared UI
-
-These responsibilities should be separated into dedicated modules while preserving current behavior.
+This file previously owned multiple responsibilities including domain models, mock database, business logic, navigation, workflow management, registry, workspace, messaging, monitoring history, and shared UI. These responsibilities have now been modularized through completed refactor phases 1–4 (type extraction, utility extraction, shared component extraction, Patient Workspace/Profile, Patient Goals, Patient Messages, and Team Messaging extraction).
 
 ---
 

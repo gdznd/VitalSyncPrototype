@@ -52,7 +52,10 @@ The V1 integration addresses these limitations for connected workflows. Use the 
 - The dashboard's patient visibility values are editable in UI but are not used to restrict which patient records a doctor can list/open.
 - The patient provider roster and messages are static. Replies are simulated, not persisted.
 
-The backend must derive the current user and their role from authenticated server-side identity. It must never trust a patient ID, doctor ID, role, visibility value, or `assignedBy` name supplied by the browser for authorization.
+**Security and Backend Boundary Rule:**
+- Backend must derive authenticated user and role server-side.
+- Do not trust browser-supplied patient IDs, roles, assignedBy values, visibility values, or ownership claims for authorization.
+- Backend is the authoritative source for authentication, authorization, patient visibility, ownership, persistence, and cross-application data sharing.
 
 ## Required domain model
 
@@ -67,11 +70,15 @@ Use stable backend IDs internally. The existing `VS-0001`-style `uniqueId` is a 
 - authentication credentials handled by the chosen backend auth mechanism
 - active/authentication status as needed for the prototype
 
+**Password and Account Provisioning Workflows:**
+- **Initial Patient Account Provisioning:** Doctor creates the patient account using the patient's email. Patient receives a login email, a secure temporary password (handled securely and not stored as plaintext), and short Patient Portal instructions. Patient changes the password on first login. This is separate from doctor self-registration.
+- **Change Password Workflow (Patient Portal Settings):** Supporting the existing Patient Portal Settings UI: Patient clicks "Change Password" → backend generates a one-time verification code → code is sent to the patient's registered email → Patient Portal displays a code-entry UI → patient enters the code → backend verifies the code → if valid, patient is allowed to set/change their password. Verification codes must be short-lived/expiring, single-use, and never exposed through the frontend except via email delivery. Do not store plaintext passwords. *(Note: A "Forgot Password" workflow is out of scope and not an MVP requirement).*
+
 **Doctor profile**
 
 The MVP persists the existing Doctor Dashboard profile workflow:
 
-- editable: name, specialty/role, clinic/organization, professional description (`about`), credential/license text, and the existing dashboard phone field;
+- editable: name, specialty/role, clinic/organization, professional description (`about`), credential/license text, initials, display color, and the existing dashboard phone field;
 - account email is the doctor's authentication identity and is displayed read-only, not edited as profile data;
 - the patient-safe provider directory exposes the public profile fields but excludes account email, phone, and editing controls.
 
@@ -79,17 +86,14 @@ Do not add new doctor settings or profile fields beyond the existing workflows. 
 
 **Patient profile**
 
-Patient-editable fields:
+Field ownership and permissions:
 
-- phone number, home address, emergency contact, date of birth, weight, and height;
-- email address through a separate account operation requiring the current password (not through the ordinary profile update);
-- profile-picture persistent storage is deferred for the MVP. A browser-only preview is not persistent profile data.
-
-Doctor-managed fields:
-
-- canonical patient name, care focus, patient type (`Out-patient` or `In-patient`), monitoring status/detail, priority, follow-up date, managing doctor, visibility, and selected doctors.
+- **Patient-editable:** phone number, email address through a separate account operation requiring the current password (changing login email is an account/authentication operation, not an ordinary profile-field edit), home address, emergency contact, date of birth, weight, and height.
+- **Doctor-managed:** canonical patient name, care focus, patient type (`Out-patient` or `In-patient`), monitoring status/detail, priority, follow-up date, managing doctor, visibility, and selected doctors.
 
 Date of birth is the source of truth. Age is derived from date of birth at display time, is not independently editable, and is not stored as a current demographic value. The legacy `age` database column is not used by the API. `memberSince` may be derived from account creation time; `lastVisit` has no approved persistent source and must not be invented.
+
+Persistent food-photo upload/storage and persistent profile-picture storage are deferred for MVP. No media-storage infrastructure is required for MVP.
 
 ### Monitoring relationship, visibility, and lifecycle
 
@@ -114,7 +118,11 @@ Authorization rule for doctor access:
 
 Patient-facing provider availability must be derived from the same relationship/visibility data, not from the current static provider list. Patients cannot add or remove providers themselves.
 
-Archiving does not delete the patient account, historical logs, messages, goals, or monitoring history. It changes the monitoring relationship to inactive. Reactivation locates the existing patient by their unique ID and restores active monitoring rather than creating a duplicate account.
+**Archive/Reactivation and Provider Goals:**
+- Archiving a patient preserves provider-goal records and their existing lifecycle status.
+- Do not automatically change goals to Paused, Completed, or Cancelled because of archiving.
+- Provider-goal workflow is suspended/hidden while inactive and restored on reactivation.
+- Archiving does not delete the patient account, historical logs, messages, goals, or monitoring history. Reactivation locates the existing patient by their unique ID and restores active monitoring rather than creating a duplicate account.
 
 When monitoring is archived:
 
@@ -127,7 +135,7 @@ While inactive, preserve the workflow invariant:
 
 - patients retain personal lifestyle self-management, history, progress, and personal goals;
 - provider-controlled monitoring functions are suspended;
-- provider-assigned goals retain their stored status and are not active monitoring work;
+- provider-assigned goals remain preserved with their existing lifecycle status while inactive and are not active monitoring work;
 - patient messaging is limited to the previous/established doctor conversation.
 
 Reactivation restores the provider-management workflow without changing stored provider-goal statuses.
@@ -152,14 +160,14 @@ Current code persists a common display-oriented log shape:
 
 The Portal currently records the following input behavior:
 
-- Food: meal type, one or more food item strings, optional description, and an image preview. The current persisted log only stores joined food items in `detail` and description in `extra`; the preview is an in-memory object URL and is not persisted.
+- Food: meal type, one or more food item strings, optional description. Image preview/upload is deferred from MVP.
 - Medication: one or more medicine name/dosage/unit entries are concatenated into `detail`.
 - Activity: activity name, minutes, optional calories; `payload.activity` and numeric `payload.minutes` are the calculation source. `detail` remains display text.
 - Sleep: sleep time, wake time, calculated duration, quality; `payload.sleepTime`, `payload.wakeTime`, numeric `payload.durationMinutes`, and `payload.quality` are structured fields. `extra` remains display text.
 - Stress and social: free-text or guided answers joined with ` || `.
 - Habit: Alcohol, Cigarettes, Vape, Gambling, and Recreational drugs, currently condensed into display strings.
 
-The API stores the structured log payload unchanged. Patient and doctor summaries and the shared goal evaluator read metric values from payload fields, not by parsing display strings. Missing or invalid activity/sleep measurements are omitted from metric calculations; sleep is never defaulted to eight hours. Older sleep payloads with `sleepTime` and `wakeTime` remain calculable without parsing `extra`. Persistent food-photo storage is deferred for the MVP; do not introduce upload endpoints, object storage, image processing, or media infrastructure, and do not persist browser object URLs.
+The backend must preserve structured data for the listed workflows. The API stores the structured log payload unchanged, stores the fields required by actual forms in typed log payloads/records, and returns a UI-compatible projection. Patient and doctor summaries and the shared goal evaluator read metric values from payload fields, not by parsing display strings. Missing or invalid activity/sleep measurements are omitted from metric calculations; sleep is never defaulted to eight hours. Older sleep payloads with `sleepTime` and `wakeTime` remain calculable without parsing `extra`. Persistent food-photo storage is deferred for the MVP; do not introduce upload endpoints, object storage, image processing, or media infrastructure, and do not persist browser object URLs.
 
 Doctors may read an authorized patient's logs. Patients may create/read their own logs. Current UI has no log editing/deletion workflow, so editing/deletion is out of scope unless the contract confirms it.
 
@@ -192,6 +200,12 @@ Current provider-goal shape:
 
 The server must set the assigning doctor from the authenticated actor rather than accepting `assignedBy` as a client-controlled name. Authorized doctors create and manage provider goal definitions/lifecycle. Patients can view and track them but cannot change their definition or status.
 
+**Goal Evaluation Rule:**
+- MVP goal evaluation remains frontend/shared canonical evaluator logic.
+- Backend stores authoritative structured logs and provider goals.
+- Backend does not calculate goal progress in MVP.
+- Do not create a new backend evaluation requirement.
+
 Supported evaluation behavior in the shared frontend evaluator:
 
 - `duration` / `activity`: sum numeric `payload.minutes` per expected day, or aggregate weekly activity.
@@ -202,7 +216,7 @@ Supported evaluation behavior in the shared frontend evaluator:
 - `none`: custom/unsupported goal; no automatic evaluation.
 - Daily evaluates each day in the start-to-review/reference window; Weekdays only Monday–Friday; Weekly calculates the weekly aggregate target.
 
-The displayed result is measurable target attainment (such as `5/7 days`, `71%`), never a clinical determination of success/failure. **MVP decision:** both frontends use the canonical shared frontend evaluator in `shared/goalEvaluator.ts`; the backend persists and returns authorized structured goals and logs but does not calculate progress. Goals that cannot be reliably evaluated from available structured data are not automatically evaluated.
+The displayed result is measurable target attainment (such as `5/7 days`, `71%`), never a clinical determination of success/failure. Goals that cannot be reliably evaluated from available structured data are not automatically evaluated.
 
 ### Personal Wellness Goals
 
@@ -240,15 +254,15 @@ Exact URL names and framework are implementation choices. Provide a clear servic
 
 | Area | Required responsibility |
 | --- | --- |
-| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Doctors self-register through the existing Doctor Dashboard account-creation flow. Patients change their password after receiving and verifying a one-time code sent to their registered email; doctors confirm their current password. A doctor-created patient account sends login email, a secure temporary password, and short Patient Portal instructions; a temporary-password patient can access only session identification and the email-code/password-change endpoints until the password is changed. General password recovery is outside this MVP. |
-| Doctor profile | Persist/edit the signed-in doctor's approved dashboard profile; return a restricted patient-safe profile only to patients authorized to view that provider. |
-| Patient profile/registry | Doctors list/open only patients they are authorized to access. Patients read/update only their own approved profile fields. |
-| Monitoring relationship | Create/add an active patient monitoring relationship, update visibility/selected doctors, archive, reactivate by existing unique ID, and expose active/inactive state. |
+| Auth/session | Sign in/out and identify the authenticated account and role; bootstrap the correct patient or doctor context. Doctors self-register through the existing Doctor Dashboard account-creation flow. Doctor-created patient accounts use email invitations with secure temporary passwords. Patients change their password after receiving and verifying a short-lived one-time code sent to their registered email; temporary-password patients can access only session identification and the email-code/password-change endpoints until the password is changed. Doctors confirm their current password for password changes. General password recovery is outside this MVP. |
+| Doctor profile | Persist/edit the signed-in doctor's approved dashboard profile (name, specialty/role, clinic/organization, about/professional description, credentials/license, initials, display color); return a restricted patient-safe profile only to patients authorized to view that provider. |
+| Patient profile/registry | Doctors list/open only patients they are authorized to access. Patients read/update only their own approved profile fields (including editable DOB). |
+| Monitoring relationship | Create/add an active patient monitoring relationship, update visibility/selected doctors (retaining managing doctor access), archive (preserving goals and lifecycle status), reactivate by existing unique ID, and expose active/inactive state. |
 | Provider directory | Return only providers available to the authenticated patient under the assignment/visibility rules, including patient-safe profile fields. |
 | Logs | Patient creates/lists their own logs; authorized doctors list a selected patient's logs with date range/filter support. |
 | Activity choices | Serve built-in activity choices from the API and persist custom activity choices per authenticated patient; never share one patient's custom choices with another. |
 | Summaries | Return logs/aggregates from the same patient data for both apps; never substitute generated mock logs. |
-| Provider goals | Authorized doctor creates, lists, updates lifecycle/definition for an authorized patient; patient reads assigned goals only. |
+| Provider goals | Authorized doctor creates, lists, updates lifecycle/definition for an authorized patient; patient reads assigned goals only. (Backend stores records without calculating progress in MVP). |
 | Personal goals | Patient-only create/read/update/cancel; never expose them in doctor APIs or summaries. |
 | Messages | List/create messages in authorized private patient-provider conversations; stable chronological ordering and persisted timestamps. |
 | Doctor records | Persist monitoring lifecycle history, doctor-private notes, one-to-one doctor Team messages, and reminder preferences, with server-side authorization. Reminder storage does not imply push-notification delivery. |
@@ -305,8 +319,10 @@ During the transition, local data is a migration aid only. Do not merge browser-
 - A clinical-success/failure conclusion from goal attainment.
 - Production-grade compliance certification, audit/compliance systems, enterprise tenancy, high-availability, or scale architecture.
 - Persistent food-photo and profile-picture storage for this MVP.
+- Food-photo persistence / media storage infrastructure.
 - New logging types, appointment scheduling, medication prescribing, or clinical records not present in the current scope.
-- New settings features or broader settings-page redesign beyond persistence of the existing controls.
+- New settings features, broader settings-page redesign, or functional dark-mode/settings polish beyond persistence of the existing controls.
+- Forgot-password workflow (out of scope for MVP).
 
 Basic secure password handling, authenticated sessions, authorization checks, input validation, and server-side data persistence are not “production extras”; they are the minimum needed to correct the prototype's current identity and isolation failure.
 
@@ -316,10 +332,10 @@ The backend is ready for the interview prototype when all of the following are d
 
 - Signing in as different doctors returns different, server-authorized data; it no longer shows Jamie's data after Rafael signs in merely because UI state changed.
 - Signing in as a patient establishes that patient's identity without a browser-selected demo ID.
-- Patient visibility (`Assigned Only`, `Selected Doctors`, `All Doctors`) is enforced by the server for registry access, patient workspace access, provider availability, and patient-provider messaging.
+- Patient visibility (`Assigned Only`, `Selected Doctors`, `All Doctors`) is enforced by the server for registry access, patient workspace access, provider availability, and patient-provider messaging, with managing doctor access always retained under Selected Doctors.
 - A patient-created lifestyle log persists and becomes visible in the authorized doctor's activity/history/summary using the same underlying record; there are no generated fallback logs in connected views.
 - Built-in activity choices are served by the API, and custom activity choices persist for their patient owner only.
-- Provider goals can be managed by an authorized doctor and viewed/tracked—but not edited or lifecycle-managed—by the assigned patient.
+- Provider goals can be managed by an authorized doctor and viewed/tracked—but not edited or lifecycle-managed—by the assigned patient (with progress evaluated on the frontend).
 - Personal goals are visible and mutable only to their owning patient.
 - Patient-safe provider profiles are served from provider data and visible only for authorized assigned/involved providers.
 - Monitoring history is based on persisted monitoring lifecycle events, and no unknown legacy date or adherence value is fabricated.
@@ -329,8 +345,8 @@ The backend is ready for the interview prototype when all of the following are d
 - Doctor self-registration and editing of the approved doctor public profile persist in PostgreSQL; account email remains an authentication identity field.
 - Patient password changes require a one-time code sent to the registered email and verified by the backend; temporary-password patients cannot use other protected resources until the new password is set. Doctors continue to confirm their current password. General password recovery remains out of scope.
 - Messages persist and remain private to the authorized patient/provider pair.
-- Archive retains the patient account/history; reactivation uses the existing unique ID and restores monitoring without duplication.
-- Inactive-monitoring behavior preserves provider-goal rows and statuses, hides patient-facing provider-goal work, prevents goal changes until reactivation, and limits messaging to the established doctor.
+- Archive retains the patient account/history, preserves provider goals and existing lifecycle status without automatic modification, and reactivation uses the existing unique ID and restores monitoring without duplication.
+- Inactive-monitoring behavior preserves provider-goal rows and statuses, hides patient-facing provider-goal work, prevents goal changes until reactivation, limits messaging to the established doctor, and follows the documented access rules.
 - Follow-up date persists and priority behavior remains consistent with the dashboard.
 - Both applications use the agreed service/API contracts without direct localStorage as their authoritative data source.
 - The team has manually exercised the core interview paths with at least two doctors and more than one patient, including a denied-access check.

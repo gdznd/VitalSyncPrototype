@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { getActivityMinutes, getSleepMinutes } from '../../../shared/logMetrics';
+import YourJourney from './YourJourney';
+import type { StressClassification } from '../lib/journey';
+import { deriveJourneyObservations } from '../lib/journey';
 
 type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit';
 type HealthLog = { id: number; type: LogType; date: string; time: string; title: string; detail: string; extra?: string; payload?: Record<string, unknown> | null };
@@ -22,6 +25,7 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
+  const [stressClassification] = useState<StressClassification>(null);
 
   useEffect(() => {
     let active = true;
@@ -109,13 +113,7 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const topActivities = Object.entries(activityByType).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const historyForSelected = selectedDate ? filtered.filter(l => l.date === selectedDate) : filtered.slice(-5);
 
-  const observations: string[] = [];
-  if (mealsLogged >= Math.max(1, daysCount)) observations.push(`${patientName || 'Patient'} has been consistently logging meals. Great progress!`);
-  if (activityMinutes > 0) observations.push("Recorded several physical activities this period. Keep moving!");
-  if (filtered.some(l => l.type === 'stress' || l.type === 'social')) observations.push("Taking time to reflect on wellbeing and connections.");
-  if (sleepMinutesArr.length > 0) observations.push("Tracking sleep is an important step toward healthier habits.");
-  if (medicationEntries > 0) observations.push("Keeping track of medications consistently.");
-  if (observations.length === 0) observations.push('Start by adding health logs.');
+  const observations = useMemo(() => deriveJourneyObservations(filtered, patientName || 'Patient'), [filtered, patientName]);
 
   return (
     <section className="summary-page">
@@ -203,22 +201,7 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
         </div>
       </section>
 
-      <section className="journey-card">
-        <div className="section-header" style={{ marginBottom: '14px' }}>
-          <div>
-            <h3>🌱 Your Journey</h3>
-            <p>Personalized observations and reflections based on recent activity.</p>
-          </div>
-        </div>
-        <div className="journey-items">
-          {observations.slice(0, 3).map((o, i) => (
-            <div key={i} className="journey-item">
-              <span className="journey-icon">✦</span>
-              <p>{o}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <YourJourney observations={observations} stressClassification={stressClassification} patientName={patientName || 'Patient'} />
     </section>
   );
 }

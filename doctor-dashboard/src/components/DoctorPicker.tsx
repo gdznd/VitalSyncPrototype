@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
-
-export type Doctor = { id: number; name: string; initials: string; color?: string }
+import type { Doctor } from '../types/doctor'
 
 export default function DoctorPicker({ doctors, selectedIds, onChange }: { doctors: Doctor[]; selectedIds: number[]; onChange: (ids: number[]) => void }) {
   const [query, setQuery] = useState('')
