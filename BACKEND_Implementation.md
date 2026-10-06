@@ -104,8 +104,8 @@ Before an explicitly approved deployment:
 **Current status (development Supabase project, empty/synthetic data only):**
 
 - IMPLEMENTED: a Supabase project hosts the development PostgreSQL database. Django connects through the Session pooler (port 5432, `sslmode=require`) and migrations `api` 0000 (squashed), 0007 and 0008 are applied. Doctor registration and patient creation with an invitation email (Ethereal test SMTP) were exercised against it.
-- NOT YET VERIFIED: the full browser workflow (logs, goals, messaging, visibility, archive/reactivate) against Supabase.
-- NOT DONE: the Supabase database password was exposed during setup and must be reset, then `DATABASE_URL` updated. `DJANGO_SECRET_KEY` and `JWT_SECRET` are still placeholders. No hosted Django/frontend deployment exists; the backend runs locally.
+- VERIFIED (reported by the backend tester): the manual browser workflow (logs, goals, messaging, visibility, archive/reactivate) was run against Supabase. The Supabase database password was reset after it was exposed during setup, and `DATABASE_URL` was updated.
+- NOT DONE: `DJANGO_SECRET_KEY` and `JWT_SECRET` are still placeholders. No hosted Django/frontend deployment exists; the backend runs locally.
 - The previous local PostgreSQL database was not migrated into Supabase (fresh start); a local backup exists outside the repository.
 - No real participant data is stored. Real data requires the ethics and research-ready requirements above.
 
