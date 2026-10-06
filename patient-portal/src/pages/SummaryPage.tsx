@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { patientApi, type PatientLog } from '../lib/api';
 import { getActivityMinutes, getSleepMinutes } from '../../../shared/logMetrics';
+import YourJourney from '../components/YourJourney';
+import { deriveJourneyObservations, type StressClassification } from '../lib/journey';
 
 type Log = PatientLog;
 
@@ -13,6 +15,7 @@ export default function SummaryPage() {
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [stressClassification] = useState<StressClassification>(null);
 
   useEffect(() => {
     let active = true;
