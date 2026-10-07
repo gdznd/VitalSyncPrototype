@@ -1,294 +1,238 @@
-# VitalSync Backend Implementation Guide
+# VitalSync Backend: Setup, Daily Use, and Deployment
 
-## Overview
-
-VitalSync's connected workflows use a Django REST Framework API and PostgreSQL:
+## 1. How the system fits together
 
 ```text
 Doctor Dashboard (React/Vite) ─┐
-                               ├─ HTTPS-style JSON API + Bearer JWT ─ Django ─ PostgreSQL
-Patient Portal (React/Vite) ───┘
+                               ├─ HTTPS JSON API ─> Django REST Framework on Render ─> PostgreSQL on Supabase
+Patient Portal (React/Vite) ───┘                              │
+                                                             └─ HTTPS email API ─> Brevo
 ```
 
-The API is the shared persistence and authorization layer for accounts, profiles, monitoring relationships, logs, goals, messages, notes, preferences, reminders, and activity choices. It is an interview prototype using synthetic/demo data, not a production healthcare service or a system approved for real participant data.
+| Part | Responsibility | Current location |
+|---|---|---|
+| Doctor Dashboard | Doctor-facing UI; calls Django for connected data | Local during development; Vercel planned |
+| Patient Portal | Patient-facing UI; calls Django for connected data | Local during development; Vercel planned |
+| Django REST Framework | Login, JWT authentication, authorization, validation, business rules, and database access | Render: `https://vitalsync-django-api.onrender.com` |
+| PostgreSQL | Persistent application data | Supabase |
+| Brevo | Sends patient invitation and password-change verification emails | Called by Django over HTTPS |
 
-## Prerequisites
+The frontends must call Django, not Supabase directly. Supabase credentials, Django/JWT secrets, and the Brevo API key are backend-only secrets. A frontend developer only needs the public Django API URL.
 
-- Windows 10/11
-- Python 3.12 recommended
-- PostgreSQL Server (pgAdmin is optional; it is only a database client)
-- Node.js and npm for the frontends
-- A local `backend/.env` copied from `backend/.env.example`, with database and secret settings
-- SMTP settings for patient invitations and password-change verification
+This is a synthetic/demo prototype. It is not approved for real participant or clinical data.
 
-Do not commit or share `.env`, database dumps, or real credentials. Never use real patient data.
+### What the three hosted platforms are for
 
-## First-time setup
+- **Render — runs the Django API.** Use its dashboard to view deploys/logs, restart or redeploy the service, and manage backend environment variables. It does not host the PostgreSQL database.
+- **Supabase — hosts PostgreSQL.** Use its dashboard to inspect/manage the database, review migration state, and manage database access. Django is the only application component that should connect to it; do not put database credentials in either frontend.
+- **Brevo — delivers transactional email.** Use it to verify the sender and manage the email API key. Django calls Brevo for patient invitations and password-change codes; Brevo does not host the app or database.
 
-### 1. Create a local PostgreSQL database
+The request flow is: frontend → Render/Django → Supabase for data; for email, Django → Brevo. A frontend-only teammate normally needs none of the three provider dashboards.
 
-1. Install and start PostgreSQL Server. The default local port is `5432`.
-2. Create an empty database, for example `vitalsync_db`.
-3. Copy `backend/.env.example` to `backend/.env`, then set machine-local values:
+## 2. Current deployment status
+
+- [x] Django API deployed to Render; health endpoint returns `status: ok` and a database timestamp.
+- [x] Render Django API connects to the Supabase PostgreSQL database.
+- [x] Supabase schema migrations are applied. Supabase is the database host; it is not running the Django API.
+- [x] Automated backend suite: 60 tests pass; Django system check and static collection pass.
+- [x] Reported manual Render checks: doctor login/registry, patient-to-doctor data round trip, patient isolation, visibility, goals, messaging, archive/reactivate, invitation email, and password-change verification email.
+- [x] Both local frontends have an ignored `.env.local` configured to call the Render API.
+- [ ] Confirm any credentials exposed in earlier screenshots/messages have been rotated or revoked; update Render/local configuration with the replacements.
+- [ ] Deploy both frontends to Vercel. Afterward update Render's `CORS_ALLOWED_ORIGINS` and `PATIENT_PORTAL_URL` to the exact deployed URLs.
+- [ ] Before any research use, meet the ethics, privacy, security, and research-ready requirements. Until then, use only synthetic/demo data.
+
+The live API base URL to give the frontend team is:
+
+```text
+https://vitalsync-django-api.onrender.com/api
+```
+
+Render's Free web service can sleep after inactivity; the first request after sleep may be delayed. Use this deployment for demo/testing, not as a production healthcare service.
+
+## 3. Inviting teammates to service accounts
+
+Only invite a teammate when their task requires access to that provider's dashboard. Frontend developers can build and test against the public API URL; they do not need Supabase database credentials, the Brevo API key, or Render environment-variable access. Never share an owner's login or send secrets in chat.
+
+### Render
+
+The current Render Hobby/Free workspace does **not** support adding team members. Do not share the Render login. The workspace owner can manage deployments and environment variables; frontend teammates can work through GitHub and use the API URL. If multiple people must administer the Render service, review the current workspace plan and upgrade only if the team approves the cost, then invite their individual accounts from workspace **Settings → Team members** with the least-privileged role available. See [Render team members](https://render.com/docs/team-members).
+
+Use the Render dashboard when deploying the Django service, checking build/runtime logs, or changing its environment variables. Keep all backend secrets in that service's environment settings; do not add them to frontend settings or Git.
+
+### Supabase
+
+Invite a teammate using their own Supabase account from the organization **Team** settings. Choose the narrowest role the plan supports. Supabase project-scoped roles are plan-limited; on plans without that option, an organization-level role may grant broader access than intended. Only the backend/database maintainer should need dashboard access, and access to the dashboard does not mean sharing the database password. See [Supabase access control](https://supabase.com/docs/guides/platform/access-control).
+
+To invite: open the Supabase organization dashboard, go to **Organization Settings → Team**, invite the teammate's own account email, and choose the least-privileged role available on the current plan. Confirm the scope before sending: organization-wide access can expose other projects too. Do not share the database password as a substitute for an invitation.
+
+### Brevo
+
+If a teammate must manage sender verification or transactional-email settings, invite their individual account through Brevo's user/team access settings if available on the current plan. Give only the access required for that task. Keep the API key in Render; do not share it with frontend developers. If the plan does not support suitable separate users, have the account owner manage Brevo. Verify current plan permissions in Brevo before inviting.
+
+Use Brevo to verify the sender address/domain and create or revoke API keys. Put the key only in Render's `BREVO_API_KEY` environment variable. A teammate does not need the API key to build or configure a frontend.
+
+When a teammate leaves or no longer needs access, remove their provider-account membership and rotate any secret they were authorized to use if it may have been exposed.
+
+## 4. First-time setup on a developer device
+
+### Requirements
+
+- Git and Node.js/npm compatible with the Vite projects.
+- Python 3.12 is recommended only if you need to run or test Django locally.
+- Access to the repository and the public API URL.
+
+### Set up the local frontends to use the deployed API
+
+Clone the repository and check out the shared working branch (currently `test-branch`). In **each** frontend folder, create a file named `.env.local`:
+
+`doctor-dashboard/.env.local`
+
+`patient-portal/.env.local`
+
+Put this in both files:
 
 ```dotenv
-DATABASE_URL=postgresql://<user>:<url-encoded-password>@localhost:5432/vitalsync_db
-DJANGO_DEBUG=true
-DJANGO_SECRET_KEY=<private-random-secret>
-JWT_SECRET=<separate-private-random-secret>
-PATIENT_PORTAL_URL=http://localhost:5174
-SMTP_HOST=smtp.ethereal.email
-SMTP_PORT=587
-SMTP_USER=<your-ethereal-login>
-SMTP_PASS=<your-ethereal-password>
+VITE_API_BASE_URL=https://vitalsync-django-api.onrender.com/api
 ```
 
-`SMTP_*` settings are needed for patient invitations and one-time password-change codes. Ethereal captures mail in the mailbox used as `SMTP_USER`; it does not deliver to the invitation's `To:` address.
+Save the files. They are intentionally gitignored and must be created separately on each developer device. Do not put a database URL, Django secret, JWT secret, or Brevo key in a frontend environment file.
 
-The initial Django migration creates the PostgreSQL domain schema from its frozen SQL snapshot and initializes Django's framework tables. `backend/schema.sql` remains a readable schema snapshot; do not run it manually before `migrate` or over an existing database.
-
-### 2. Install and check Django
-
-From PowerShell at the repository root:
-
-```powershell
-cd backend
-py -3.12 -m venv .venv-win
-.\.venv-win\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv-win\Scripts\python.exe manage.py migrate
-.\.venv-win\Scripts\python.exe manage.py check
-```
-
-For a fresh database, `migrate` creates the API schema and Django framework tables. Migration `0000_initial_domain_schema` replaces the previously applied `0001`–`0006` history when Django detects those migrations are already present; `0007` adds the password-change verification table; `0008` records the unmanaged Django model state without creating duplicate tables. Do not run migrations against a shared/existing database without a backup and review.
-
-### 3. Start the API
-
-Keep PostgreSQL running. From `backend/`:
-
-```powershell
-.\.venv-win\Scripts\python.exe manage.py runserver 127.0.0.1:8000
-```
-
-Open `http://localhost:8000/api/health`. A healthy response includes `"status": "ok"`.
-
-### 4. Start the frontends when needed
-
-Use separate terminals from the repository root:
+Install each frontend's dependencies once (or again after dependency changes):
 
 ```powershell
 cd doctor-dashboard
-npm install
+npm ci
+```
+
+```powershell
+cd patient-portal
+npm ci
+```
+
+`package-lock.json` files are committed, so `npm ci` installs the recorded dependency versions.
+
+## 5. Daily use: local frontends + hosted backend
+
+The usual current workflow does **not** need local PostgreSQL or a local Django server. Render runs Django and Django connects to Supabase online.
+
+Open two terminals from the repository root:
+
+```powershell
+cd doctor-dashboard
 npm run dev
 ```
 
 ```powershell
 cd patient-portal
-npm install
 npm run dev
 ```
 
-The dashboard is at `http://localhost:5173`; the patient portal is at `http://localhost:5174`. Install frontend packages only the first time or after dependency changes.
+Open:
 
-## Supabase-hosted PostgreSQL preparation
+- Doctor Dashboard: `http://localhost:5173`
+- Patient Portal: `http://localhost:5174`
+- API health check: `https://vitalsync-django-api.onrender.com/api/health`
 
-The deployment architecture remains React/Vite → Django/DRF → PostgreSQL. Supabase is the PostgreSQL host only; the applications continue to call Django, and no Supabase client, authentication, or data API is introduced.
+Vite reads `.env.local` only at startup. If you edit it while a dev server is running, stop that server with `Ctrl+C` and run `npm run dev` again.
 
-Before an explicitly approved deployment:
+The current Render CORS setting permits the local frontend origins above. Browser requests go from the local frontend to the remote Render API, then Django reads/writes Supabase. Email is sent by Django through Brevo. Reload the page to verify persisted changes.
 
-1. Set `DATABASE_URL` from the Supabase PostgreSQL connection settings. Keep the URL private; include `sslmode=require` when required by the chosen Supabase endpoint.
-2. Set `DJANGO_DEBUG=false`, a unique `DJANGO_SECRET_KEY`, and a separate unique `JWT_SECRET`. Django refuses to start with debug disabled if the Django secret is missing.
-3. Set `DJANGO_ALLOWED_HOSTS` to the API host, `CORS_ALLOWED_ORIGINS` to the deployed frontend origins, and `CSRF_TRUSTED_ORIGINS` where required.
-4. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for patient invitations and password-change verification email.
-5. Review `manage.py migrate --plan`, back up any existing database, and apply Django migrations only after approval.
+## 6. Optional: run Django locally
 
-**Current status (development Supabase project, empty/synthetic data only):**
+Only do this when you are developing or debugging the backend itself. The local frontends normally use Render as described above.
 
-- IMPLEMENTED: a Supabase project hosts the development PostgreSQL database. Django connects through the Session pooler (port 5432, `sslmode=require`) and migrations `api` 0000 (squashed), 0007 and 0008 are applied. Doctor registration and patient creation with an invitation email (Ethereal test SMTP) were exercised against it.
-- VERIFIED (reported by the backend tester): the manual browser workflow (logs, goals, messaging, visibility, archive/reactivate) was run against Supabase. The Supabase database password was reset after it was exposed during setup, and `DATABASE_URL` was updated.
-- DEPLOYMENT PREPARATION: the backend test suite passes (60 tests), WhiteNoise static collection succeeds, and Gunicorn/WhiteNoise are declared as runtime dependencies. Django's Brevo HTTPS email backend preserves patient invitations and password-change verification. No hosted Django/frontend deployment exists yet; Django still runs locally.
-- SECURITY ACTION: the tracked `.env.example` has been sanitized. SMTP credentials that were present there must be rotated; replacing the file does not remove old values from Git history. Use new production-only Django/JWT secrets in Render.
-- The previous local PostgreSQL database was not migrated into Supabase (fresh start); a local backup exists outside the repository.
-- No real participant data is stored. Real data requires the ethics and research-ready requirements above.
+From `backend/`, create a Python virtual environment, install backend requirements, and make a private `.env` from the tracked example:
 
-### Connecting a new device to the shared Supabase database
+```powershell
+cd backend
+py -3.12 -m venv .venv-win
+.\.venv-win\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
 
-The database lives online, so a new device only needs the code and the connection details. Do not run a new Supabase setup or create another project.
+Edit `backend/.env` with private, machine-specific values. At minimum provide separate `DJANGO_SECRET_KEY` and `JWT_SECRET` values and a valid `DATABASE_URL`. For a local Django server that sends email, configure the SMTP fields for a test mail service such as Ethereal. Never commit or share this file.
 
-1. Clone the repository and check out `test-branch`.
-2. In `backend/`, create the virtual environment and install dependencies:
-   `py -3.12 -m venv .venv-win`, then `.\.venv-win\Scripts\python.exe -m pip install -r requirements.txt`.
-3. Copy `backend/.env.example` to `backend/.env`. `.env` is gitignored, so it never comes with the clone.
-4. Get the `DATABASE_URL` (Supabase Session pooler, port 5432, ending in `?sslmode=require`) and the SMTP settings from the project owner through a private channel. Do not commit them, paste them into chats, or share screenshots of them.
-5. Do **not** run `manage.py migrate` unless a new migration was added. The tables already exist on Supabase. Check with `manage.py migrate --plan`; it should report nothing to apply.
-6. Run `manage.py check`, then `manage.py runserver 127.0.0.1:8000`, then start both frontends as described in Daily startup.
-
-Everyone using the same `DATABASE_URL` shares the same data. If the Supabase password is reset, every device must update its `.env`. Supabase free-tier projects may require the connecting network to allow outbound port 5432.
-
-### Render Django API deployment
-
-The Django service is not deployed yet. Render's current Django guide is at <https://render.com/docs/deploy-django>.
-
-For a manually configured Render Web Service, use:
-
-| Setting | Value |
-|---|---|
-| Repository branch | `test-branch` (push the required code before connecting it) |
-| Root Directory | `backend` |
-| Runtime | Python |
-| Build Command | `pip install -r requirements.txt && python manage.py collectstatic --no-input` |
-| Start Command | `gunicorn vitalsync_api.wsgi:application --bind 0.0.0.0:$PORT` |
-
-Do not run migrations as part of the build command. The current Supabase database is already migrated; if a new migration is introduced, review its plan and apply it to the intended database once, with approval.
-
-Configure these environment variables in the Render service, not in the repository:
-
-- `DJANGO_DEBUG=false`
-- `DJANGO_SECRET_KEY` and `JWT_SECRET`: generate separate, long random values for production.
-- `DATABASE_URL`: the existing Supabase Session pooler connection URL, kept private.
-- `DJANGO_ALLOWED_HOSTS`: the service's exact `<name>.onrender.com` hostname.
-- `DJANGO_SECURE_SSL_REDIRECT=true`
-- `CORS_ALLOWED_ORIGINS`: local development origins while testing, then add the exact Vercel origins when the frontend deployments exist.
-- `CSRF_TRUSTED_ORIGINS`: add exact HTTPS origins if a Django CSRF-protected browser flow requires them.
-- `EMAIL_BACKEND=api.email_backend.BrevoEmailBackend`
-- `BREVO_API_KEY`: keep the secret in Render's environment variables only.
-- `EMAIL_FROM_ADDRESS`: an approved/verified sender address configured in Brevo.
-- `PATIENT_PORTAL_URL`: the patient portal URL; initially local for development testing, then replace it with the deployed Vercel URL.
-
-The local development setup can keep Django's SMTP email backend and Ethereal. For Render, Django switches to its Brevo HTTPS backend, which sends the same invitation and verification messages through Brevo's transactional email API at <https://developers.brevo.com/reference/sendtransacemail>. Configure a verified sender in Brevo before testing. Do not add the Brevo API key to `.env.example`, source code, or Git.
-
-Render Free web services cannot send outbound SMTP traffic on ports 25, 465, or 587, so do not configure Ethereal SMTP in the Render service. The Free tier also spins down after 15 minutes without inbound traffic; use it only for synthetic/demo testing, not as a production healthcare service.
-
-After deployment, verify `/api/health`, login, protected API access, patient isolation, logging, goals, messaging, and password-change email. Share the final API URL and any required environment configuration with the frontend team; Vercel frontends will set `VITE_API_BASE_URL` to that URL.
-
-## Daily startup
-
-1. If `.env` points to local PostgreSQL, start its Windows service. If it points to Supabase, no local PostgreSQL service is needed.
-2. Start Django from `backend/`:
+To use the local Django server, set `VITE_API_BASE_URL=http://localhost:8000/api` in both frontend `.env.local` files, restart both Vite servers, then run:
 
 ```powershell
 .\.venv-win\Scripts\python.exe manage.py check
 .\.venv-win\Scripts\python.exe manage.py runserver 127.0.0.1:8000
 ```
 
-3. Optionally start the Doctor Dashboard and Patient Portal using `npm run dev` in their folders.
-4. Confirm the health endpoint responds before testing connected workflows.
+The API health URL is `http://localhost:8000/api/health`. Django's development server is for local development only; Render uses Gunicorn.
 
-Do **not** use `npm run dev` inside `backend/` to start the active backend. That command starts leftover Express code, not PostgreSQL or the Django REST API.
+### Database migration safety
 
-## How a request is handled
+The shared Supabase database is already migrated. Do **not** run `migrate` as part of daily startup, on every developer device, or in Render's build command.
 
-1. A frontend API client sends JSON to `http://localhost:8000/api/...`; authenticated requests include `Authorization: Bearer <token>`.
-2. Login checks the submitted credentials against the PostgreSQL account record and returns a signed JWT.
-3. `VitalSyncJWTAuthentication` validates the token, loads the account and role, and makes the authenticated account available to the API view.
-4. The view validates the request, applies role and patient/doctor visibility rules, then reads or writes PostgreSQL through Django models.
-5. The API serializes the result as JSON; the frontend updates its view from that response.
+When a backend change adds or alters a model/field:
 
-Temporary-password patients are blocked from all other protected resources by `VitalSyncJWTAuthentication`, not only by the Patient Portal routes. They can read their session and use the email-code/password-change endpoints until the backend records a new password.
+1. Create and review the migration in development.
+2. Back up the intended database and review `manage.py migrate --plan`.
+3. Coordinate with the backend owner, then apply the migration to Supabase once.
+4. Other developers pull the code; they do not re-apply an already recorded migration.
 
-PostgreSQL is the persistent data store. Django REST Framework is the API and authorization layer. The two React apps are clients; local browser state is not the source of truth for connected records.
+`backend/schema.sql` is a reference snapshot, not a script to run manually over the existing database.
 
-## Important code paths
+## 7. Render configuration reference
 
-**Login signs a short-lived JWT** (`backend/api/views.py`):
+The existing Render Web Service uses:
 
-```python
-token = jwt.encode(
-    {"id": account.id, "email": account.email, "role": account.role,
-     "iat": issued_at, "exp": issued_at + timedelta(hours=24)},
-    settings.JWT_SECRET,
-    algorithm="HS256",
-)
-```
+| Setting | Value |
+|---|---|
+| Repository branch | `test-branch` |
+| Root Directory | `backend` |
+| Runtime | Python 3 |
+| Build Command | `pip install -r requirements.txt && python manage.py collectstatic --no-input` |
+| Start Command | `gunicorn vitalsync_api.wsgi:application --bind 0.0.0.0:$PORT` |
 
-The frontend stores the returned token and sends it on authenticated API requests.
+Render environment variables are entered in the Render dashboard, not committed to Git:
 
-**Authentication resolves the account from the token** (`backend/api/authentication.py`):
+| Variable | Purpose |
+|---|---|
+| `DJANGO_DEBUG=false` | Production debug setting |
+| `DJANGO_SECRET_KEY` | Private Django signing secret |
+| `JWT_SECRET` | Separate private token-signing secret |
+| `DATABASE_URL` | Private Supabase Session pooler PostgreSQL URL (port 5432, SSL required) |
+| `DJANGO_ALLOWED_HOSTS` | Render API hostname, without `https://` |
+| `DJANGO_SECURE_SSL_REDIRECT=true` | Require HTTPS |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated exact frontend origins; currently local origins, later the Vercel origins |
+| `EMAIL_BACKEND=api.email_backend.BrevoEmailBackend` | Send hosted email through Brevo HTTPS API |
+| `BREVO_API_KEY` | Private Brevo API key |
+| `EMAIL_FROM_ADDRESS` | Verified sender email configured in Brevo |
+| `PATIENT_PORTAL_URL` | Patient portal URL used in invitation email; currently local, later the Vercel URL |
+| `CSRF_TRUSTED_ORIGINS` | Set exact HTTPS origins only if a CSRF-protected browser flow requires them |
 
-```python
-claims = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-account = UserAccount.objects.get(id=claims["id"], role=claims["role"])
-return account, claims
-```
+Never expose or paste secret values into chat, screenshots, source code, frontend variables, or Git. Rotate any credential that has been exposed.
 
-Invalid or expired tokens are rejected. API views separately enforce the role and resource-level access.
+## 8. Email flow
 
-**Patient logs are scoped to the signed-in patient or an authorized doctor** (`backend/api/logs.py`):
+- Local Django development can use Django's SMTP email backend and a test mailbox such as Ethereal.
+- The deployed Render service uses `api.email_backend.BrevoEmailBackend`, which calls Brevo's transactional email endpoint over HTTPS.
+- Both patient invitations and password-change verification codes use Django's configured email backend.
+- The sender address must be verified in Brevo. The Brevo API key belongs only in Render's `BREVO_API_KEY`.
+- Render Free blocks common outbound SMTP ports, which is why hosted email uses the HTTPS API rather than Ethereal SMTP.
 
-```python
-patient = PatientProfile.objects.filter(user_id=request.user.id).first()
-logs = LifestyleLog.objects.filter(patient_id=patient.id)
-```
+## 9. Gitignored files and dependencies
 
-For doctor reads, the API first checks the requested patient against the doctor's authorized patient IDs; unauthorized patient records return `404`. The same principle is applied across other protected resources.
+These files/folders are local or generated and are not shared through Git:
 
-**The frontend API client adds the bearer token** (`doctor-dashboard/src/lib/api.ts`; the Patient Portal has its own client):
-
-```typescript
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-```
-
-## Files changed: where to look
-
-This is a practical map of the integration, not a full Git change log.
-
-| Area | Main files | Why they changed |
+| Path/pattern | Why ignored | Tracked alternative |
 |---|---|---|
-| Django API | `backend/api/views.py`, `patients.py`, `profiles.py`, `logs.py`, `goals.py`, `personal_goals.py`, `messaging.py`, `records.py`, `preferences.py`, `activity_types.py` | Implement login and account flows, persistence, validation, serialization, and role/ownership/visibility checks for connected features. |
-| Django configuration and schema | `backend/api/models.py`, `backend/api/authentication.py`, `backend/api/migrations/0000`, `0007`, `0008`, `backend/vitalsync_api/settings.py`, `urls.py`, `backend/schema.sql` | Map PostgreSQL tables, restrict temporary-password JWTs, configure the API from environment variables, register endpoints, and provide initial, incremental, and state-only migrations. |
-| Doctor Dashboard | `doctor-dashboard/src/lib/api.ts`, `App.tsx`, `components/DoctorSettingsPage.tsx`, `components/DoctorProfilePage.tsx`, `components/LoginPage.tsx`, `components/RecentActivitySummary.tsx` | Replace browser-only/fabricated data with API reads and writes; keep authorized doctor workflows and settings connected to the backend. |
-| Patient Portal | `patient-portal/src/lib/api.ts`, `App.tsx`, `components/AppShell.tsx`, `pages/LoginPage.tsx`, `ProfilePage.tsx`, `HomePage.tsx`, `SummaryPage.tsx`, `GoalsPage.tsx`, `MessagesPage.tsx`, `SettingsPage.tsx`, `ChangePasswordPage.tsx`, `lib/storage.ts` | Connect authentication, patient profile/logs/goals/messages/settings to the API and remove obsolete local mock storage. |
-| Shared behavior | `shared/goalEvaluator.ts`, `shared/logMetrics.ts` | Keep supported goal evaluation and structured activity/sleep metrics consistent across both frontends; Django stores and returns the goal/log payloads. |
-| Developer/research docs | `BACKEND.md`, `BACKEND_Implementation.md`, `BACKENDREADME.txt`, `WORKFLOW.md`, `ARCHITECTURE.md`, `CLAUDE.md` | Keep the requirements, workflows, architecture, prototype boundaries, and setup/verification guidance aligned. This implementation guide explains how to run and understand the current integration; it does not replace the feature contract or research approvals. |
+| `backend/.env`, `backend/.env.*` | Private backend configuration/secrets | `backend/.env.example` is deliberately unignored and safe of real credentials |
+| `backend/.venv*/` | Local Python virtual environments | Install from `backend/requirements.txt` |
+| `backend/__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `backend/staticfiles/`, `dist/` | Python/test/build output | Regenerate with Python tools or `collectstatic` |
+| `doctor-dashboard/node_modules/`, `dist/`, `*.local` | Frontend dependencies, build output, and local env files (including `.env.local`) | `package.json` and `package-lock.json`; create `.env.local` on each device |
+| `patient-portal/node_modules/`, `dist/`, `.env*.local` | Frontend dependencies, build output, and local env files | `package.json` and `package-lock.json`; create `.env.local` on each device |
 
-## Demo accounts and a safe demo flow
+Install frontend dependencies with `npm ci` in each frontend directory. Install Django dependencies with `python -m pip install -r requirements.txt` in the backend virtual environment. Do not commit virtual environments, `node_modules`, generated static/build output, `.env` files, database dumps, or secrets.
 
-There are **no shared starter accounts, seeded demo users, or universal passwords**. A fresh database is empty:
+## 10. Feature scope and safe use
 
-1. Open the Doctor Dashboard and register the first synthetic doctor using **Create one**. Use an email/password you control locally; there is no built-in default password.
-2. Sign in as that doctor and use **Add Patient** to create a synthetic patient. The patient invitation contains the patient login and temporary password.
-3. For invitation and password-change testing, check the Ethereal mailbox configured by `SMTP_USER` (not the test recipient's Ethereal address). At first login, the patient must request and verify the emailed code before setting a password.
-4. Sign in to the Patient Portal with the invitation credentials, then verify that patient logs/messages/goals are private to that patient and that the authorized doctor sees only accessible records.
-5. Use only synthetic records. Archive test patients when finished; do not place reusable passwords or local database credentials in this guide.
+Implemented connected workflows include authentication, profiles, patient registry, visibility/authorization, logs, provider and personal goals, messages, notes, preferences, custom activity choices, reminders, monitoring history, and archive/reactivation.
 
-Accounts created in one developer's local database do not exist in a teammate's fresh database. Create local demo accounts rather than sharing a database dump or relying on credentials from another machine.
+Not implemented: general password recovery, notification delivery, profile-photo storage, offline sync, real-time updates, push notifications, doctor mobile app, or clinical diagnosis/decision support. The rule-based "Your Journey" text is not AI, NLP, or clinical prediction.
 
-## Verification and current boundaries
+All study-facing records must remain synthetic/demo data until ethics approval and all research-ready requirements are met.
 
-- Django system check passes; the focused backend test suite has **58 passing tests**, including login/registration, patient provisioning, authorization, lifecycle, ownership, messaging, structured logs, temporary-password enforcement, and the email-code password-change flow.
-- The 2026-10-04 manual browser run passed the 20 persistence, authorization, and cross-role checks recorded during integration, including patient-to-patient isolation.
-- Notification preferences persist but do not send notifications. General password recovery, photo storage, offline sync, real-time updates, push notifications, and a doctor mobile app are not implemented.
-- The doctor's selected theme preference persists, but the visual theme does not re-apply after a full browser refresh; that is a frontend issue.
-- Clean-machine rehearsal and the adviser/Feature Contract audit remain group/research checks, not backend implementation blockers.
-- This prototype is not approved for real participant data. Research/ethics requirements and system-readiness review must be satisfied first.
-
-For feature requirements and decisions, see `BACKEND.md`. For approved workflow and system context, see `WORKFLOW.md`, `ARCHITECTURE.md`, and `CLAUDE.md`.
-
----
-
-## Quick summary checklist: backend additions and V1 → V2 changes
-
-In this checklist, **V1** and **V2** refer to the project's first and second implementation iterations (the work before and after the two implementation sessions). They do not name backend technologies or releases. This guide describes the current Django REST Framework + PostgreSQL implementation.
-
-### Backend capabilities added or connected
-
-- [x] Django REST Framework API connected to PostgreSQL.
-- [x] JWT login for doctor and patient accounts, doctor self-registration, patient registered-email one-time-code password change, and current-password-confirmed doctor password change. Temporary-password patients are restricted from protected resources until completion.
-- [x] Persistent patient and doctor profiles, patient registry, doctor/patient authorization, visibility settings, follow-up dates, and archive/reactivation.
-- [x] Persistent patient lifestyle logs, provider-assigned goals, and patient-owned personal goals.
-- [x] Persistent patient–doctor conversations, doctor-to-doctor Team messages, doctor notes, and monitoring history.
-- [x] Persistent account settings, per-conversation preferences, doctor reminder preferences, and patient-owned custom activity choices.
-- [x] Server-checked access rules keep patient records scoped to the patient and authorized doctors.
-- [x] Django initial/squashed migration, incremental migration 0007, and state-only migration 0008 support fresh-database schema creation, existing-database upgrades, and migration-state consistency; `backend/schema.sql` remains a reference snapshot.
-- [x] Focused API tests and earlier browser verification cover contract-critical persistence and authorization flows; current API tests use mocked persistence rather than a cloud/database deployment.
-
-### Main changes from V1 to V2
-
-- [x] Replaced browser-only/mock data for connected workflows with authenticated API reads and writes.
-- [x] Replaced fabricated dashboard activity/history with persisted records and monitoring lifecycle data.
-- [x] Added database persistence for workflows that previously existed only in app state, including settings, conversation controls, notes, reminders, Team messages, and custom activity choices.
-- [x] Added server-side role, ownership, and doctor–patient visibility enforcement rather than relying on frontend filtering alone.
-- [x] Kept the two React frontends as clients and placed shared persistence/authentication in Django + PostgreSQL.
-- [x] Preserved explicitly deferred features as out of scope: general password recovery, push-notification delivery, photo storage, offline sync, real-time updates, and a doctor mobile app.
-
-All study-facing records must remain synthetic/demo data until research and ethics requirements are met.
+For feature requirements and decisions, consult [BACKEND.md](./BACKEND.md), [WORKFLOW.md](./WORKFLOW.md), [ARCHITECTURE.md](./ARCHITECTURE.md), and [CLAUDE.md](./CLAUDE.md).
