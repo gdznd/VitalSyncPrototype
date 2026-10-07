@@ -36,6 +36,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -84,7 +85,16 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Manila"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = [
@@ -101,14 +111,26 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend",
+)
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 EMAIL_HOST = os.getenv("SMTP_HOST", "")
 EMAIL_PORT = int(os.getenv("SMTP_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("SMTP_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("SMTP_PASS", "")
 EMAIL_USE_TLS = os.getenv("SMTP_USE_TLS", str(EMAIL_PORT == 587)).lower() == "true"
-DEFAULT_FROM_EMAIL = os.getenv("SMTP_FROM", EMAIL_HOST_USER)
+DEFAULT_FROM_EMAIL = os.getenv(
+    "EMAIL_FROM_ADDRESS",
+    os.getenv("SMTP_FROM", EMAIL_HOST_USER),
+)
 PATIENT_PORTAL_URL = os.getenv("PATIENT_PORTAL_URL", "http://localhost:5174")
 SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "false").lower() == "true"
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_HSTS_SECONDS = int(
+    os.getenv("DJANGO_SECURE_HSTS_SECONDS", "0" if DEBUG else "31536000")
+)
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 

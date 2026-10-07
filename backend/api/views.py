@@ -17,6 +17,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from django.views.decorators.http import require_GET
 
+from api.email_backend import EmailDeliveryError, email_is_configured
 from api.models import DoctorProfile, PasswordChangeVerification, PatientProfile, UserAccount
 
 logger = logging.getLogger(__name__)
@@ -164,7 +165,7 @@ def request_password_change_code(request):
     account = request.user
     if account.role != "patient":
         return Response({"message": "Patient account required."}, status=status.HTTP_403_FORBIDDEN)
-    if not all((settings.EMAIL_HOST, settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD)):
+    if not email_is_configured():
         return Response(
             {"message": "Email verification is not configured."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -201,7 +202,7 @@ def request_password_change_code(request):
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[account.email],
             ).send(fail_silently=False)
-    except (OSError, smtplib.SMTPException):
+    except (EmailDeliveryError, OSError, smtplib.SMTPException):
         logger.exception("Password-change verification email could not be sent")
         return Response(
             {"message": "Could not send the verification code. Please try again later."},

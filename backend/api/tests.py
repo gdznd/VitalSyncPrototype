@@ -1,15 +1,19 @@
 from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import bcrypt
+from django.conf import settings
+from django.core.mail import EmailMessage
 from django.test import SimpleTestCase
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.authentication import VitalSyncJWTAuthentication
+from api.email_backend import BrevoEmailBackend, EmailDeliveryError
 from api.models import UserAccount
 from api.activity_types import BUILT_IN_ACTIVITY_TYPES, patient_activity_types
 from api.preferences import account_preferences, conversation_preferences
@@ -40,6 +44,61 @@ from api.views import (
     request_password_change_code,
     verify_password_change_code,
 )
+
+
+class BrevoEmailBackendTests(SimpleTestCase):
+    @patch("api.email_backend.urlopen")
+    def test_sends_plain_text_email_through_brevo_api(self, urlopen):
+        response = Mock()
+        response.status = 201
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        urlopen.return_value = response
+        message = EmailMessage(
+            subject="Test subject",
+            body="Test body",
+            from_email="VitalSync <sender@example.test>",
+            to=["Patient <patient@example.test>"],
+        )
+
+        with (
+            patch.object(settings, "EMAIL_BACKEND", "api.email_backend.BrevoEmailBackend"),
+            patch.object(settings, "BREVO_API_KEY", "test-api-key"),
+            patch.object(settings, "DEFAULT_FROM_EMAIL", "sender@example.test"),
+        ):
+            sent = BrevoEmailBackend().send_messages([message])
+
+        self.assertEqual(sent, 1)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.brevo.com/v3/smtp/email")
+        self.assertEqual(request.get_header("Api-key"), "test-api-key")
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "sender": {"name": "VitalSync", "email": "sender@example.test"},
+                "to": [{"name": "Patient", "email": "patient@example.test"}],
+                "subject": "Test subject",
+                "textContent": "Test body",
+                "htmlContent": "Test body",
+            },
+        )
+
+    def test_brevo_failure_is_not_reported_as_a_success(self):
+        message = EmailMessage(
+            subject="Test subject",
+            body="Test body",
+            from_email="sender@example.test",
+            to=["patient@example.test"],
+        )
+
+        with (
+            patch.object(settings, "EMAIL_BACKEND", "api.email_backend.BrevoEmailBackend"),
+            patch.object(settings, "BREVO_API_KEY", "test-api-key"),
+            patch.object(settings, "DEFAULT_FROM_EMAIL", "sender@example.test"),
+            patch("api.email_backend.urlopen", side_effect=TimeoutError),
+            self.assertRaises(EmailDeliveryError),
+        ):
+            BrevoEmailBackend().send_messages([message])
 
 
 class PatientProfileValueTests(SimpleTestCase):

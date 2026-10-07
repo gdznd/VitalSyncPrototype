@@ -105,7 +105,8 @@ Before an explicitly approved deployment:
 
 - IMPLEMENTED: a Supabase project hosts the development PostgreSQL database. Django connects through the Session pooler (port 5432, `sslmode=require`) and migrations `api` 0000 (squashed), 0007 and 0008 are applied. Doctor registration and patient creation with an invitation email (Ethereal test SMTP) were exercised against it.
 - VERIFIED (reported by the backend tester): the manual browser workflow (logs, goals, messaging, visibility, archive/reactivate) was run against Supabase. The Supabase database password was reset after it was exposed during setup, and `DATABASE_URL` was updated.
-- NOT DONE: `DJANGO_SECRET_KEY` and `JWT_SECRET` are still placeholders. No hosted Django/frontend deployment exists; the backend runs locally.
+- DEPLOYMENT PREPARATION: the backend test suite passes (60 tests), WhiteNoise static collection succeeds, and Gunicorn/WhiteNoise are declared as runtime dependencies. Django's Brevo HTTPS email backend preserves patient invitations and password-change verification. No hosted Django/frontend deployment exists yet; Django still runs locally.
+- SECURITY ACTION: the tracked `.env.example` has been sanitized. SMTP credentials that were present there must be rotated; replacing the file does not remove old values from Git history. Use new production-only Django/JWT secrets in Render.
 - The previous local PostgreSQL database was not migrated into Supabase (fresh start); a local backup exists outside the repository.
 - No real participant data is stored. Real data requires the ethics and research-ready requirements above.
 
@@ -123,9 +124,45 @@ The database lives online, so a new device only needs the code and the connectio
 
 Everyone using the same `DATABASE_URL` shares the same data. If the Supabase password is reset, every device must update its `.env`. Supabase free-tier projects may require the connecting network to allow outbound port 5432.
 
+### Render Django API deployment
+
+The Django service is not deployed yet. Render's current Django guide is at <https://render.com/docs/deploy-django>.
+
+For a manually configured Render Web Service, use:
+
+| Setting | Value |
+|---|---|
+| Repository branch | `test-branch` (push the required code before connecting it) |
+| Root Directory | `backend` |
+| Runtime | Python |
+| Build Command | `pip install -r requirements.txt && python manage.py collectstatic --no-input` |
+| Start Command | `gunicorn vitalsync_api.wsgi:application --bind 0.0.0.0:$PORT` |
+
+Do not run migrations as part of the build command. The current Supabase database is already migrated; if a new migration is introduced, review its plan and apply it to the intended database once, with approval.
+
+Configure these environment variables in the Render service, not in the repository:
+
+- `DJANGO_DEBUG=false`
+- `DJANGO_SECRET_KEY` and `JWT_SECRET`: generate separate, long random values for production.
+- `DATABASE_URL`: the existing Supabase Session pooler connection URL, kept private.
+- `DJANGO_ALLOWED_HOSTS`: the service's exact `<name>.onrender.com` hostname.
+- `DJANGO_SECURE_SSL_REDIRECT=true`
+- `CORS_ALLOWED_ORIGINS`: local development origins while testing, then add the exact Vercel origins when the frontend deployments exist.
+- `CSRF_TRUSTED_ORIGINS`: add exact HTTPS origins if a Django CSRF-protected browser flow requires them.
+- `EMAIL_BACKEND=api.email_backend.BrevoEmailBackend`
+- `BREVO_API_KEY`: keep the secret in Render's environment variables only.
+- `EMAIL_FROM_ADDRESS`: an approved/verified sender address configured in Brevo.
+- `PATIENT_PORTAL_URL`: the patient portal URL; initially local for development testing, then replace it with the deployed Vercel URL.
+
+The local development setup can keep Django's SMTP email backend and Ethereal. For Render, Django switches to its Brevo HTTPS backend, which sends the same invitation and verification messages through Brevo's transactional email API at <https://developers.brevo.com/reference/sendtransacemail>. Configure a verified sender in Brevo before testing. Do not add the Brevo API key to `.env.example`, source code, or Git.
+
+Render Free web services cannot send outbound SMTP traffic on ports 25, 465, or 587, so do not configure Ethereal SMTP in the Render service. The Free tier also spins down after 15 minutes without inbound traffic; use it only for synthetic/demo testing, not as a production healthcare service.
+
+After deployment, verify `/api/health`, login, protected API access, patient isolation, logging, goals, messaging, and password-change email. Share the final API URL and any required environment configuration with the frontend team; Vercel frontends will set `VITE_API_BASE_URL` to that URL.
+
 ## Daily startup
 
-1. Start the PostgreSQL Windows service (for example, from Windows Services).
+1. If `.env` points to local PostgreSQL, start its Windows service. If it points to Supabase, no local PostgreSQL service is needed.
 2. Start Django from `backend/`:
 
 ```powershell

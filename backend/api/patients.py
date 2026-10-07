@@ -15,6 +15,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from api.email_backend import EmailDeliveryError, email_is_configured
 from api.models import AccountPreference, DoctorProfile, MonitoringRelationship, PatientProfile, UserAccount
 from api.profiles import calculate_age
 
@@ -120,12 +121,7 @@ def create_patient(request, doctor_profile):
     if phone is not None and not isinstance(phone, str):
         return Response({"message": "Phone must be a string."}, status=status.HTTP_400_BAD_REQUEST)
 
-    smtp_values = [settings.EMAIL_HOST, settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD]
-    smtp_configured = all(
-        value and not re.match(r"^(your_|placeholder|example)", value, re.IGNORECASE)
-        for value in smtp_values
-    )
-    if not smtp_configured:
+    if not email_is_configured():
         return Response(
             {"message": "Patient invitation email is not configured."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -195,7 +191,7 @@ def create_patient(request, doctor_profile):
             {"message": "A user with this email or patient ID already exists."},
             status=status.HTTP_409_CONFLICT,
         )
-    except (OSError, smtplib.SMTPException):
+    except (EmailDeliveryError, OSError, smtplib.SMTPException):
         logger.exception("Patient account creation or invitation email failed")
         return Response(
             {"message": "Could not create the patient account and send its invitation."},
