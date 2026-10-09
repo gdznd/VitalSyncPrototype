@@ -1,69 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
+import { patientApi, type ConversationMessage, type PatientProvider } from '../lib/api';
 
 export function MessagesPage() {
-  // Static provider roster: the prototype shows only providers assigned to the patient
-  const allProviders = [
-    {
-      id: 101,
-      name: 'Dr. Jamie Dizon',
-      initials: 'JD',
-      color: '#f9c6c6',
-      role: 'Primary care',
-      specialty: 'Lifestyle Medicine',
-      clinic: 'VitalSync Clinic, Makati',
-      about: 'Dr. Jamie Dizon is a Lifestyle Medicine specialist dedicated to supporting sustainable, evidence-based behavioral change. Her clinical focus is nutrition, physical activity, and sleep optimization to prevent and manage chronic conditions.',
-      license: 'PRC License No. 12345 · Specialist, Lifestyle Medicine'
-    },
-    {
-      id: 102,
-      name: 'Nurse Rafael',
-      initials: 'NR',
-      color: '#c6e1f9',
-      role: 'Nurse',
-      specialty: 'Clinical Care & Monitoring',
-      clinic: 'VitalSync Clinic, Makati',
-      about: 'Nurse Rafael assists patients with daily health logging, medication adherence reminders, and ongoing vital sign monitoring.',
-      license: 'RN License No. 67890 · Registered Nurse'
-    },
-    {
-      id: 103,
-      name: 'Dr. Ana Cruz',
-      initials: 'AC',
-      color: '#d6f9d6',
-      role: 'Cardiology',
-      specialty: 'Cardiovascular Health',
-      clinic: 'VitalSync Clinic, Makati',
-      about: 'Dr. Ana Cruz specializes in cardiology and heart-healthy lifestyle interventions, supporting patients through cardiac rehab and blood pressure management.',
-      license: 'PRC License No. 54321 · Board-Certified Cardiologist'
-    },
-    {
-      id: 104,
-      name: 'Reception',
-      initials: 'RC',
-      color: '#efe3c6',
-      role: 'Admin',
-      specialty: 'Clinic Administration',
-      clinic: 'VitalSync Clinic, Makati',
-      about: 'Clinic reception and administrative support team assisting with appointments, scheduling, and portal inquiries.',
-      license: 'Administrative Services Certification #301'
-    }
-  ];
-
-  // For the prototype the assigned providers are a static subset (simulate assignment)
-  const assignedProviderIds = [101, 102, 103];
-  const convs = allProviders.filter(p => assignedProviderIds.includes(p.id));
-
-  // messages keyed by conversation id
-  const [messagesMap, setMessagesMap] = useState<Record<number, any[]>>(() => ({
-    101: [ { id: 1, sender: 'doctor', text: 'Good morning — how did your sleep log go?', time: '9:02 AM', important: true }, { id: 2, sender: 'patient', text: 'Better, thank you — I did the breathing exercise.', time: '9:10 AM', important: false } ],
-    102: [ { id: 10, sender: 'nurse', text: 'Don’t forget your med reminder at 6pm.', time: 'Yesterday', important: true } ],
-    103: [ { id: 20, sender: 'doctor', text: 'Please book a follow-up if chest pain recurs.', time: 'Mon', important: true } ]
-  }));
-
-  const [selectedId, setSelectedId] = useState<number>(convs[0].id);
+  const [providers, setProviders] = useState<PatientProvider[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [messagesMap, setMessagesMap] = useState<Record<number, ConversationMessage[]>>({});
+  const [selectedId, setSelectedId] = useState(0);
   const [mobileChatOpen, setMobileChatOpen] = useState<boolean>(false);
   const [input, setInput] = useState('');
-  const [typing, setTyping] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageError, setMessageError] = useState('');
+  const [sending, setSending] = useState(false);
   const [providerQuery, setProviderQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -72,21 +19,77 @@ export function MessagesPage() {
   const [importantNext, setImportantNext] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setTimeout(() => threadRef.current?.scrollTo({ top: threadRef.current?.scrollHeight ?? 0, behavior: 'smooth' }), 50); }, [messagesMap, selectedId, typing, mobileChatOpen]);
+  useEffect(() => {
+    let active = true;
+    patientApi.getProviders()
+      .then(({ providers: availableProviders }) => {
+        if (!active) return;
+        setProviders(availableProviders);
+        setSelectedId(availableProviders[0]?.id ?? 0);
+      })
+      .catch((error) => { if (active) setMessageError(error instanceof Error ? error.message : 'Could not load assigned providers.'); })
+      .finally(() => { if (active) setProvidersLoading(false); });
+    return () => { active = false; };
+  }, []);
 
-  function nowTime() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    setMessagesLoading(true);
+    setMessageError('');
+    patientApi.getMessages(selectedId)
+      .then(({ messages }) => { if (active) setMessagesMap((current) => ({ ...current, [selectedId]: messages })); })
+      .catch((error) => { if (active) setMessageError(error instanceof Error ? error.message : 'Could not load messages.'); })
+      .finally(() => { if (active) setMessagesLoading(false); });
+    return () => { active = false; };
+  }, [selectedId]);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
-    const msg = { id: Date.now(), sender: 'patient', text: input.trim(), time: nowTime(), important: importantNext };
-    setMessagesMap(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] ?? []), msg] }));
-    setInput('');
-    setImportantNext(false);
-    // simulate reply
-    setTimeout(() => { setTyping(true); }, 400);
-    setTimeout(() => { setTyping(false); const reply = { id: Date.now()+1, sender: 'doctor', text: 'Thanks — got it.', time: nowTime(), important: false }; setMessagesMap(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] ?? []), reply] })); }, 1400);
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    setPinned(false);
+    setNotificationPreference('All messages');
+    patientApi.getConversationPreferences(selectedId)
+      .then(({ preferences }) => {
+        if (!active) return;
+        setPinned(preferences.pinned);
+        setNotificationPreference(preferences.notificationPreference);
+      })
+      .catch((error) => { if (active) setMessageError(error instanceof Error ? error.message : 'Could not load conversation preferences.'); });
+    return () => { active = false; };
+  }, [selectedId]);
+
+  useEffect(() => { setTimeout(() => threadRef.current?.scrollTo({ top: threadRef.current?.scrollHeight ?? 0, behavior: 'smooth' }), 50); }, [messagesMap, selectedId, mobileChatOpen]);
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || !selectedId || sending) return;
+    setSending(true);
+    setMessageError('');
+    try {
+      const { message } = await patientApi.sendMessage(selectedId, text, importantNext);
+      setMessagesMap((current) => ({ ...current, [selectedId]: [...(current[selectedId] ?? []), message] }));
+      setInput('');
+      setImportantNext(false);
+    } catch (error) {
+      setMessageError(error instanceof Error ? error.message : 'Could not send message.');
+    } finally {
+      setSending(false);
+    }
   };
 
+  const updateConversationPreferences = async (changes: { pinned?: boolean; notificationPreference?: 'All messages' | 'Important only' | 'Muted' }) => {
+    try {
+      const { preferences } = await patientApi.updateConversationPreferences(selectedId, changes);
+      setPinned(preferences.pinned);
+      setNotificationPreference(preferences.notificationPreference);
+      setMessageError('');
+    } catch (error) {
+      setMessageError(error instanceof Error ? error.message : 'Could not save conversation preferences.');
+    }
+  };
+
+  const convs = providers;
   const getLatestMessage = (id: number) => {
     const msgs = messagesMap[id] ?? [];
     if (msgs.length === 0) return { text: 'No messages yet', time: '' };
@@ -101,6 +104,9 @@ export function MessagesPage() {
   // group consecutive messages by sender to reduce repeated headers
   const grouped: Array<{ sender: string; items: any[] }> = [];
   filteredMsgs.forEach((m:any) => { const last = grouped[grouped.length-1]; if (!last || last.sender !== m.sender) grouped.push({ sender: m.sender, items: [m] }); else last.items.push(m); });
+
+  if (providersLoading) return <section className="messages-page"><p>Loading assigned providers...</p></section>;
+  if (!selectedProvider) return <section className="messages-page"><header className="section-header message-title"><div><p className="eyebrow">Messages</p><h2>Assigned Healthcare Team</h2></div></header><p className="directory-empty">{messageError || 'No providers are currently available for messaging.'}</p></section>;
 
   return (
     <section className="messages-page">
@@ -141,24 +147,25 @@ export function MessagesPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
               <span className="avatar" style={{ background: selectedProvider.color }}>{selectedProvider.initials}</span>
               <div style={{ flex: 1, minWidth: 0 }}><h2>{selectedProvider.name}</h2><p className="muted small">{selectedProvider.role}</p></div>
-              <div className="conversation-actions"><button className="icon-button" aria-label="Conversation options" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>•••</button>{menuOpen && <div className="conversation-menu"><button type="button" onClick={() => { setPinned(value => !value); setMenuOpen(false); }}>{pinned ? 'Unpin conversation' : 'Pin conversation'}</button><label className="notification-choice">Notifications<select aria-label="Notification preference" value={notificationPreference} onChange={event => setNotificationPreference(event.target.value)}><option>All messages</option><option>Important only</option><option>Muted</option></select></label><button type="button" onClick={() => { setProviderInfoOpen(true); setMenuOpen(false); }}>See Profile</button><small className="conversation-privacy">Private conversation between you and your assigned provider.</small></div>}</div>
+              <div className="conversation-actions"><button className="icon-button" aria-label="Conversation options" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>•••</button>{menuOpen && <div className="conversation-menu"><button type="button" onClick={() => { void updateConversationPreferences({ pinned: !pinned }); setMenuOpen(false); }}>{pinned ? 'Unpin conversation' : 'Pin conversation'}</button><label className="notification-choice">Notifications<select aria-label="Notification preference" value={notificationPreference} onChange={event => { void updateConversationPreferences({ notificationPreference: event.target.value as 'All messages' | 'Important only' | 'Muted' }); }}><option>All messages</option><option>Important only</option><option>Muted</option></select></label><button type="button" onClick={() => { setProviderInfoOpen(true); setMenuOpen(false); }}>See Profile</button><small className="conversation-privacy">Private conversation between you and your assigned provider.</small></div>}</div>
             </div>
           </header>
 
           <div className="chat-thread" ref={threadRef}>
+            {messagesLoading && <p className="muted">Loading messages...</p>}
+            {messageError && <p className="login-error" role="alert">{messageError}</p>}
             {grouped.map((group, gi) => (
               <div key={gi} className={`message-group ${group.sender === 'doctor' || group.sender === 'nurse' ? 'left' : 'right'}`}>
                 {(group.sender === 'doctor' || group.sender === 'nurse') && <div className="doctor-header"><div className="doctor-avatar small">{selectedProvider.initials}</div><div><strong>{selectedProvider.name}</strong></div></div>}
                 <div className="group-items">{group.items.map((m:any) => <div key={m.id} className={`bubble-row ${m.sender}`}><div className={`bubble ${m.sender} ${m.important ? 'important' : ''}`}><p>{m.text}</p>{m.important && <small className="important-badge">Important</small>}<small className="time">{m.time}</small></div></div>)}</div>
               </div>
             ))}
-            {typing && <div className="typing-indicator"><div className="doctor-avatar small">{selectedProvider.initials}</div><div className="typing">Typing…</div></div>}
           </div>
 
           <div className="message-compose">
             <button type="button" className={importantNext ? 'important-toggle active' : 'important-toggle'} onClick={() => setImportantNext(v => !v)}>Important</button>
             <input value={input} onChange={e => setInput(e.target.value)} placeholder={`Message ${selectedProvider.name.split(' ')[0]}...`} onKeyDown={e => { if (e.key === 'Enter') sendMessage(); }} />
-            <button className="primary-button" onClick={sendMessage}>Send</button>
+            <button className="primary-button" onClick={sendMessage} disabled={sending || !input.trim()}>{sending ? 'Sending...' : 'Send'}</button>
           </div>
         </section>
       </div>

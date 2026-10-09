@@ -40,12 +40,11 @@ Never blur these states together. Ordinary coding discussion and conversation do
 
 - **Patient side:** `patient-portal/`. React 18 + TypeScript + Vite, configured as an installable PWA (`vite-plugin-pwa`), with `react-router-dom`.
 - **Doctor side:** `doctor-dashboard/`. React 19 + TypeScript + Vite web dashboard. Component responsibilities have been modularized (Patient Workspace, Goals, Messages, Team Messages, and Profile extracted).
-- **No backend, API, or database.** Data lives in browser `localStorage` (`patient-portal/src/lib/storage.ts`) and in hard-coded or in-memory React state.
-- **Mock login only.**
-  - Doctor accounts are stored in `localStorage` with plaintext passwords.
-  - The patient login accepts any input. The patient identity defaults to demo patient `VS-0002`.
-- **The two apps do not share data.** The doctor summary falls back to generated demo logs (`doctor-dashboard/src/components/RecentActivitySummary.tsx`).
-- **All data is mock/demo data.** Never describe it as participant data. Never say the prototype collects real participant data.
+- **Backend:** a V1 Django REST Framework API backed by PostgreSQL is implemented in `backend/`. Both frontends use JWT-authenticated API flows for core connected workflows. This is an interview-prototype integration, not a production healthcare system.
+- **Authentication:** the backend authenticates doctor and patient accounts, stores bcrypt password hashes, and requires temporary-password patients to change their password. Patient account invitations use email. Doctors self-register through the existing dashboard flow; general password recovery is outside the MVP.
+- **Shared data:** connected logs, goals, messages, patient registry, monitoring relationships/history, doctor notes, and existing account/conversation preferences are persisted through the backend. Built-in activity choices are served by the API and custom activity choices are patient-owned backend records. Consult `BACKEND_Implementation.md` for remaining browser and full-workflow verification.
+- **Profile integration:** patient contact/health fields and date-of-birth-derived age are connected to PostgreSQL. Doctor profile GET/PATCH is also connected; migrations `0002`–`0006` are applied to the configured local database. Before migrations 0004–0006, a same-server clone was verified as `vitalsync_db_backup_20261004_0052`; before migration 0003, the earlier same-server clone is `vitalsync_db_backup_20261003_2330`. Profile-photo selection is preview-only and is not stored.
+- **All study-facing data must remain synthetic/demo until ethics and research-ready requirements are met.** Never describe prototype records as participant data or claim the prototype has collected real participant data.
 
 ### Features present in the code
 
@@ -53,12 +52,13 @@ Being in the code does not make a feature a research variable.
 - Food, medication, activity, and sleep logging.
 - Stress and social reflections, and a habits/substance questionnaire.
 - Patient and doctor summaries, including "Your Journey" observations.
-- Provider-assigned goals with rule-based target attainment (`src/lib/goalEvaluator.ts`).
+- Provider-assigned goals with rule-based target attainment (`shared/goalEvaluator.ts`), shared by both frontends.
 - Personal wellness goals.
-- Doctor–patient and team messaging (UI only; messages are not saved).
-- Visibility controls (not enforced).
-- Archive/reactivate.
-- Monitoring history (hard-coded).
+- Persisted one-to-one doctor–patient messaging for authorized conversations and one-to-one doctor Team messages.
+- Persisted doctor/patient settings, per-conversation pin/filter preferences, and patient-owned custom activity choices. Notification preferences are stored only; delivery is not implemented.
+- Server-enforced visibility and selected-doctor authorization.
+- Archive/reactivate while preserving patient accounts/history. Provider-goal statuses remain unchanged; inactive monitoring suspends provider-goal work.
+- Monitoring history derived from persisted monitoring lifecycle episodes.
 - A follow-up date with derived follow-up priority.
 
 ### Not implemented
@@ -74,7 +74,7 @@ Being in the code does not make a feature a research variable.
 ## Planned final system
 
 - **Planned architecture:** React/Vite frontend → **Django + Django REST Framework** backend → **PostgreSQL (Supabase)**. TiDB is **not** part of the plan.
-- **Next development stage:** backend integration, following `BACKEND.md`.
+- **Next development stage:** continue backend integration and verification, following `BACKEND.md` and the current status in `BACKEND_Implementation.md`.
 - **Research-ready requirements** (must be met before any real participant data is collected or used):
   - authentication;
   - authorization and role isolation;
@@ -205,4 +205,5 @@ Every unresolved item must be labeled **PROPOSED / FOR ADVISER REVIEW**.
 Each app is installed and run separately.
 - **Doctor dashboard:** `cd doctor-dashboard && npm install && npm run dev`. Lint with `npm run lint` (oxlint).
 - **Patient portal:** `cd patient-portal && npm install && npm run dev`.
-- **Tests:** no test runner is configured. `patient-portal/src/lib/goalEvaluator.test.ts` is a standalone assertion script.
+- **Backend checks:** from `backend/`, run `.\.venv-win\Scripts\python.exe manage.py check` and `.\.venv-win\Scripts\python.exe manage.py test api.tests`.
+- **Other tests:** `patient-portal/src/lib/goalEvaluator.test.ts` is a standalone assertion script; no patient-portal test runner is configured.

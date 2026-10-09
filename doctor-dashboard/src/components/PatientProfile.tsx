@@ -5,7 +5,7 @@ import { followUpPriority } from '../lib/patientUtils'
 import DoctorPicker from './DoctorPicker'
 import RecentActivitySummary from './RecentActivitySummary'
 
-export function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors, activities }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities: string[][] }) {
+export function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => void; doctors: Doctor[]; activities?: string[][] }) {
   const [followUp, setFollowUp] = useState(patient.followUpDate)
   const [vis, setVis] = useState<Patient['visibility']>(patient.visibility)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -34,7 +34,7 @@ export function PatientProfile({ patient, onContact, onReminder, reminderSet, on
       </article>
       <article className="profile-card"><h3>Today’s log</h3><div className="log-summary"><span>🍽</span><div><strong>Breakfast submitted</strong><p>8:14 AM · On time</p></div></div><div className="log-summary"><span>☾</span><div><strong>Sleep pending</strong><p>Due by 10:00 AM</p></div></div></article>
     </div>
-    <RecentActivitySummary activities={activities} patientName={patient.name} patientUniqueId={patient.uniqueId} />
+    <RecentActivitySummary patientId={patient.id} patientName={patient.name} />
     {pickerOpen && <div className="modal-backdrop" onMouseDown={() => setPickerOpen(false)}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" onClick={() => { onUpdateVisibility(patient.id, 'Selected Doctors', selectedDoctors); setPickerOpen(false) }}>Confirm selection</button></div></section></div>}
   </section>
 }
