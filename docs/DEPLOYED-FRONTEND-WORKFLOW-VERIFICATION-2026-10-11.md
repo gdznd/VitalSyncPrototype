@@ -71,3 +71,20 @@ The above are recorded for frontend-owner handoff. No frontend files were change
 - Any real-participant workflow or research/ethics approval.
 
 This report records the walkthrough evidence only. It does not change the Feature Contract Matrix's implementation/testing columns or claim full system completion.
+
+## Task brief deliverables status
+
+Status against **“## 8. Required deliverables”** in `VitalSync_JS_Updated_Task_Brief.md`, as of 2026-10-11:
+
+| # | Required deliverable | Status | Evidence / remaining work |
+|---|---|---|---|
+| 1 | Deployed workflow verification report against the matrix | ✅ Complete for the workflows tested | Results, evidence sources, and untested workflows are recorded above; this was not an exhaustive regression of every matrix row. |
+| 2 | Defect/blocker list with reproducible steps and evidence | ✅ Complete for observed issues | Frontend defects and next actions are listed above. |
+| 3 | Four-class stress-only model implemented or a clear blocker report | ✅ Implemented | Model artifact, four labels, normalization, and classification handling are in the backend. |
+| 4 | Reproducible training/evaluation procedure and actual metrics (or explicitly pending status) | ✅ Complete | Dataset split, settings, validation selection, test metrics, and limitations are recorded above. |
+| 5 | Documented API contract and confirmed doctor-only visibility/access rules | ◐ Partial | Proposed API shape and backend authorization checks are documented and tested; endpoint/UI placement and persistence contract still need team agreement. |
+| 6 | Integration test evidence for valid, blank, short, error, and authorization cases | ◐ Partial | Backend API-view tests cover these cases using mocked data; live-database and deployed end-to-end testing remain. |
+| 7 | Updated NLP documentation references and Feature Contract Matrix status | ❌ Not complete | NLP-folder references and the matrix have not been updated. The multilingual dataset versus English-only brief discrepancy needs research-owner/JC confirmation first. |
+| 8 | Handoff to JC and frontend owner with remaining issues and exact next actions | ❌ Not yet sent | This report records the open decisions and actions, but the handoff message has not been sent. |
+
+The statuses above describe this task's deliverables; they do not imply research approval, clinical validity, or deployed end-to-end completion.
