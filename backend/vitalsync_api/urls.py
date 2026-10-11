@@ -4,6 +4,7 @@ from django.urls import path
 from api.activity_types import patient_activity_types
 from api.patients import archive_patient, doctor_directory, patient_detail, patient_list, reactivate_patient, update_patient_follow_up, update_patient_visibility
 from api.logs import lifestyle_logs
+from api.stress_views import stress_classification
 from api.goals import doctor_provider_goals, patient_provider_goals
 from api.personal_goals import personal_goal_detail, personal_goals
 from api.messaging import doctor_patient_conversation, patient_conversation, patient_provider_directory
@@ -40,6 +41,7 @@ urlpatterns = [
     path("api/patients/<int:patient_id>/archive", archive_patient, name="patient-archive"),
     path("api/patients/<int:patient_id>/visibility", update_patient_visibility, name="patient-visibility"),
     path("api/logs", lifestyle_logs, name="lifestyle-logs"),
+    path("api/patients/<int:patient_id>/stress-classification", stress_classification, name="stress-classification"),
     path("api/activity-types", patient_activity_types, name="patient-activity-types"),
     path("api/patients/<int:patient_id>/provider-goals", doctor_provider_goals, name="doctor-provider-goals"),
     path("api/provider-goals", patient_provider_goals, name="patient-provider-goals"),

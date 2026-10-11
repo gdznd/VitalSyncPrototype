@@ -1,0 +1,18 @@
+{
+  "model_version": "svm-2026-10-11",
+  "labels": [
+    "NO_STRESS",
+    "MILD_STRESS",
+    "MODERATE_STRESS",
+    "HIGH_STRESS"
+  ],
+  "selected_C": 10.0,
+  "seed": 42,
+  "trained_on": "train+val",
+  "n_fit_rows": 426,
+  "dataset": "vitalsync_stress_dataset_final500_v1.0.csv",
+  "dataset_sha256": "b6cf6655d17ea66f9332dbe6118106155e560acc16f782458bc4335a5790e43e",
+  "model_sha256": "6595cda08e0b98362f4b37f09ffba76c8ab3f1c86fffb02901a363efe81c3a27",
+  "sklearn": "1.9.1",
+  "numpy": "2.5.4"
+}

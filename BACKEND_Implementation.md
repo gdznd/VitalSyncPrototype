@@ -235,4 +235,11 @@ Not implemented: general password recovery, notification delivery, profile-photo
 
 All study-facing records must remain synthetic/demo data until ethics approval and all research-ready requirements are met.
 
+### Stress NLP/SVM module (PROPOSED contract, pending team agreement)
+
+- Four-class stress-only model (`NO_STRESS`, `MILD_STRESS`, `MODERATE_STRESS`, `HIGH_STRESS`), trained on the frozen v1.0 dataset. Model and metadata: `backend/api/nlp_model/stress_svm.joblib` / `.json`; rebuild with `python -m api.nlp_model.export_model <dataset.csv> <C>` from `backend/`.
+- Endpoint: `POST /api/patients/<id>/stress-classification` with `{"log_id": n}`. Doctor-only and limited to authorized patients; patients get 403. Response has `label`, `status`, `model_version` and no confidence. Nothing is stored and reflection text is never logged.
+- Results are technical performance on simulated data (test accuracy 0.676, macro-F1 0.577), not clinical validity. Details: `docs/DEPLOYED-FRONTEND-WORKFLOW-VERIFICATION-2026-10-11.md`.
+- Requires `scikit-learn`, `numpy`, `scipy`, `joblib` (added to `requirements.txt`); the model is only valid with the pinned scikit-learn version.
+
 For feature requirements and decisions, consult [BACKEND.md](./BACKEND.md), [WORKFLOW.md](./WORKFLOW.md), [ARCHITECTURE.md](./ARCHITECTURE.md), and [CLAUDE.md](./CLAUDE.md).
