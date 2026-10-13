@@ -25,7 +25,28 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
-  const [stressClassification] = useState<StressClassification>(null);
+  const [stressClassification, setStressClassification] = useState<StressClassification>(null);
+
+  // Classify the patient's latest stress reflection (any date). Doctor-only; nothing is stored.
+  useEffect(() => {
+    let active = true;
+    setStressClassification({ status: 'loading' });
+    api.getPatientLogs(patientId, { type: 'stress' })
+      .then(async ({ logs: stressLogs }) => {
+        const latest = stressLogs[0];
+        if (!latest) {
+          if (active) setStressClassification({ status: 'no_reflection' });
+          return;
+        }
+        const result = await api.classifyStressReflection(patientId, latest.id);
+        if (!active) return;
+        if (result.status === 'ok' && result.label) setStressClassification({ status: 'ok', label: result.label, date: latest.date });
+        else if (result.status === 'unable_to_classify') setStressClassification({ status: 'unable_to_classify', date: latest.date });
+        else setStressClassification({ status: 'unavailable' });
+      })
+      .catch(() => { if (active) setStressClassification({ status: 'unavailable' }); });
+    return () => { active = false; };
+  }, [patientId]);
 
   useEffect(() => {
     let active = true;

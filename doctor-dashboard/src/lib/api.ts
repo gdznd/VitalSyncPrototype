@@ -184,6 +184,12 @@ export const api = {
     if (filters.type) params.set('type', filters.type);
     return fetchWithAuth<{ logs: { id: number; patient_id: number; patientUniqueId: string | null; type: 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit'; date: string; time: string; title: string; detail: string; extra: string; payload: Record<string, unknown> }[] }>(`/logs?${params.toString()}`);
   },
+  // Doctor-only: classify one stored stress reflection. The result is returned, not stored.
+  classifyStressReflection: (patientId: number, logId: number) =>
+    fetchWithAuth<{ log_id: number; patient_id: number; label: 'NO_STRESS' | 'MILD_STRESS' | 'MODERATE_STRESS' | 'HIGH_STRESS' | null; status: 'ok' | 'unable_to_classify' | 'model_unavailable'; model_version: string | null }>(`/patients/${patientId}/stress-classification`, {
+      method: 'POST',
+      body: JSON.stringify({ log_id: logId }),
+    }),
   getPatientMessages: (patientId: number) =>
     fetchWithAuth<{ messages: PatientConversationMessage[] }>(`/patients/${patientId}/messages`),
   sendPatientMessage: (patientId: number, text: string, important: boolean) =>

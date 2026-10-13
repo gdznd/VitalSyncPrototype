@@ -1,4 +1,3 @@
-export type StressClassification = "HIGH_STRESS" | "LOW_NORMAL" | null;
 
 export function deriveJourneyObservations(logs: any[]): string[] {
   const observations: string[] = [];
@@ -32,16 +31,4 @@ export function deriveJourneyObservations(logs: any[]): string[] {
   return observations;
 }
 
-export function getNlpObservation(stressClassification: StressClassification, isDoctor: boolean = false, patientName: string = 'Patient'): string | null {
-  if (stressClassification === "HIGH_STRESS") {
-    return isDoctor
-      ? `The latest stress reflection for ${patientName} was classified as High Stress by the prototype NLP module.`
-      : "Your latest stress reflection was classified as High Stress by the prototype NLP module.";
-  }
-  if (stressClassification === "LOW_NORMAL") {
-    return isDoctor
-      ? `The latest stress reflection for ${patientName} was classified as Low/Normal Stress by the prototype NLP module.`
-      : "Your latest stress reflection was classified as Low/Normal Stress by the prototype NLP module.";
-  }
-  return null;
-}
+// The stress classification is doctor-only (team decision D-03): the Patient Portal never shows it.
