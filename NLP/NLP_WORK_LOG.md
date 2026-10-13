@@ -157,3 +157,10 @@ Guided Reflection: five answers -> one input
 ```
 
 If this historical record conflicts with `NLP.md`, **`NLP.md` wins**.
+
+## 2026-10-13 (JC)
+
+- Dataset v1.0 frozen on 2026-10-09: 500 texts, kappa 0.621 (linear weighted 0.775) from independent labels, adjudicated.
+- Model trained 2026-10-11 (C = 10; test accuracy 0.676, macro-F1 0.577); results reproduced independently by JC.
+- Team decisions 2026-10-12: classification result not stored; support claimed for English only; doctor-only display.
+- Branch `feature/stress-svm-integration`: Doctor Dashboard shows the four-class result in Your Journey; Patient Portal no longer shows any stress class; final Guided Reflection Q1-Q5 added. Not yet deployed or tested end to end.

@@ -85,7 +85,9 @@ These are research/model labels, **not clinical diagnoses**.
 
 ## 4. Input
 
-Supported languages: - English - Filipino - mixed English-Filipino
+Dataset languages: English, Filipino, and mixed English-Filipino.
+
+Supported (claimed) language: **English only** (team decision, October 12, 2026). Exploratory test-set accuracy was 0.76 for English (n = 54) and 0.45 for Filipino (n = 20); the test set has no mixed texts. This does not establish reliable Filipino or mixed-language classification.
 
 Bisaya is outside current NLP scope.
 
@@ -110,8 +112,7 @@ Social Connectedness is not sent to this classifier.
 
 ## 5. Dataset
 
-Target follows the manuscript: **approximately 1,000 texts**. The final
-report must use the actual final dataset count; never invent a count.
+Final dataset: **500 texts**, `vitalsync_stress_dataset_final500_v1.0.csv` (frozen October 9, 2026; MD5 `14712c860b41ed1232b61e958eb7f3fc`). The earlier ~1,000-text target was not used; reports must use 500.
 
 Dataset: - researcher-generated simulated text; - AI-assisted
 drafting/generation; - researcher reviewed; - no real patient
@@ -323,7 +324,7 @@ The classifier is not a diagnostic or treatment system.
 **In scope:** stress free text, four classes, TF-IDF, Linear SVM, OvR,
 simulated dataset, annotation, validation/test evaluation,
 reproducibility, standalone demonstration, Stress Log integration, Your
-Journey, English/Filipino/mixed English-Filipino.
+Journey (doctor-only), English (claimed support; the dataset also contains Filipino and mixed texts).
 
 **Out of scope:** LLM replacement, multi-label NLP, NLP for every
 Lifestyle Medicine pillar, diagnosis, treatment recommendations,
@@ -360,7 +361,7 @@ reproducibility and document consequential changes.
 
 ### Core NLP --- required
 
--   [ ] \~1,000-text target addressed and final count recorded
+-   [x] final count recorded: 500 texts (v1.0)
 -   [ ] simulated/AI-assisted/reviewed provenance documented
 -   [ ] four classes used
 -   [ ] two annotators completed

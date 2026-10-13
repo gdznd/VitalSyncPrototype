@@ -26,10 +26,10 @@ free-text survey inputs using Precision, Recall, and F1-Score.
   RQ2                    FROZEN            Do not modify
   Objective 2            FROZEN            Do not modify
   Stress classes         FINAL             No/Mild/Moderate/High
-  Dataset                FINAL             \~1,000 researcher-generated simulated texts
+  Dataset                FINAL             500 researcher-generated simulated texts (v1.0)
   AI assistance          FINAL             AI-assisted, researcher reviewed
   Annotators             FINAL             Two; user is second annotator
-  Languages              FINAL             English/Filipino/mixed
+  Languages              FINAL             Data EN/FIL/mixed; claimed support EN only
   Bisaya                 OUT               Not current scope
   Model                  FINAL             Linear SVM
   Multiclass             FINAL             One-vs-Rest
@@ -111,9 +111,7 @@ No AI assistant may invent them.
 
 ## 8. Dataset alignment
 
-The manuscript target is approximately 1,000 texts. Earlier smaller
-working datasets are intermediate artifacts. Final reporting must match
-the actual final model dataset.
+The final model dataset has 500 texts (v1.0, frozen October 9, 2026); the earlier ~1,000 target was not used. Earlier working datasets are intermediate artifacts. Final reporting must match the actual final model dataset.
 
 ## 9. Change procedure
 
