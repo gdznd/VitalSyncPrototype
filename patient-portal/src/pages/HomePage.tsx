@@ -6,7 +6,13 @@ type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social
 type HealthLog = PatientLog;
 type Medication = { name: string; dosage: string; unit: string };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const current = new Date();
+  const year = current.getFullYear();
+  const month = String(current.getMonth() + 1).padStart(2, '0');
+  const day = String(current.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 const now = () => new Date().toTimeString().slice(0, 5);
 const icons: Record<LogType, string> = { food: '🍽️', medication: '💊', activity: '🚶', sleep: '😴', stress: '🧠', social: '🤝', habit: '🌿' };
 const labels: Record<LogType, string> = { food: 'Food', medication: 'Medication', activity: 'Physical Activity', sleep: 'Sleep', stress: 'Stress', social: 'Social', habit: 'Lifestyle Habits' };
