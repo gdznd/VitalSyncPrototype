@@ -6,7 +6,13 @@ type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social
 type HealthLog = PatientLog;
 type Medication = { name: string; dosage: string; unit: string };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const current = new Date();
+  const year = current.getFullYear();
+  const month = String(current.getMonth() + 1).padStart(2, '0');
+  const day = String(current.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 const now = () => new Date().toTimeString().slice(0, 5);
 const icons: Record<LogType, string> = { food: '🍽️', medication: '💊', activity: '🚶', sleep: '😴', stress: '🧠', social: '🤝', habit: '🌿' };
 const labels: Record<LogType, string> = { food: 'Food', medication: 'Medication', activity: 'Physical Activity', sleep: 'Sleep', stress: 'Stress', social: 'Social', habit: 'Lifestyle Habits' };
@@ -192,7 +198,7 @@ function StressModal({ onSave, onCancel }: { onSave: (entry: any) => void; onCan
   const save = () => {
     if (mode === 'express') onSave({ detail: expressText }); else onSave({ detail: answers.join(' || ') });
   };
-  return <div className="log-form"><div className="segmented"><button className={`seg ${mode==='express'?'active':''}`} onClick={() => setMode('express')}>Express Yourself</button><button className={`seg ${mode==='guided'?'active':''}`} onClick={() => setMode('guided')}>Guided Reflection</button></div>{mode === 'express' ? <label>Share<textarea value={expressText} placeholder="Describe anything that has been stressful recently..." onChange={e => setExpressText(e.target.value)} /></label> : <div><label>What has been your biggest source of stress recently?<input value={answers[0]} onChange={e => setAnswers(a => a.map((v,i)=>i===0?e.target.value:v))} /></label><label>How has this affected your daily life?<input value={answers[1]} onChange={e => setAnswers(a => a.map((v,i)=>i===1?e.target.value:v))} /></label><label>What helped you cope?<input value={answers[2]} onChange={e => setAnswers(a => a.map((v,i)=>i===2?e.target.value:v))} /></label><label>Is there anything you wish had gone differently?<input value={answers[3]} onChange={e => setAnswers(a => a.map((v,i)=>i===3?e.target.value:v))} /></label><label>Is there anything you would like your healthcare team to know?<input value={answers[4]} onChange={e => setAnswers(a => a.map((v,i)=>i===4?e.target.value:v))} /></label></div>}<div className="modal-actions"><button className="secondary-button" onClick={onCancel}>Cancel</button><button className="primary-button" onClick={save}>Save</button></div></div>;
+  return <div className="log-form"><div className="segmented"><button className={`seg ${mode==='express'?'active':''}`} onClick={() => setMode('express')}>Express Yourself</button><button className={`seg ${mode==='guided'?'active':''}`} onClick={() => setMode('guided')}>Guided Reflection</button></div>{mode === 'express' ? <label>Share<textarea value={expressText} placeholder="Describe anything that has been stressful recently..." onChange={e => setExpressText(e.target.value)} /></label> : <div><label>What, if anything, has been causing you stress or worry recently?<input value={answers[0]} onChange={e => setAnswers(a => a.map((v,i)=>i===0?e.target.value:v))} /></label><label>How have you been feeling lately, including about anything you mentioned above?<input value={answers[1]} onChange={e => setAnswers(a => a.map((v,i)=>i===1?e.target.value:v))} /></label><label>Has this affected your daily life, such as your sleep, energy, or usual activities? If so, how?<input value={answers[2]} onChange={e => setAnswers(a => a.map((v,i)=>i===2?e.target.value:v))} /></label><label>What, if anything, have you tried to help yourself cope with these concerns, and how has it been working?<input value={answers[3]} onChange={e => setAnswers(a => a.map((v,i)=>i===3?e.target.value:v))} /></label><label>How manageable do things feel to you right now?<input value={answers[4]} onChange={e => setAnswers(a => a.map((v,i)=>i===4?e.target.value:v))} /></label></div>}<div className="modal-actions"><button className="secondary-button" onClick={onCancel}>Cancel</button><button className="primary-button" onClick={save}>Save</button></div></div>;
 }
 
 function SocialModal({ onSave, onCancel }: { onSave: (entry: any) => void; onCancel: () => void }) {

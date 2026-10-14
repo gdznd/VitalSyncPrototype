@@ -9,6 +9,7 @@ type LogType = 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social
 type HealthLog = { id: number; type: LogType; date: string; time: string; title: string; detail: string; extra?: string; payload?: Record<string, unknown> | null };
 
 const ranges = ['Last 3 Days', 'Last 7 Days', 'Last 14 Days', 'Last 30 Days', 'Custom'] as const;
+const STRESS_CLASSIFICATION_TIMEOUT_MS = 15_000;
 
 function formatLocalDate(date: Date) {
   const year = date.getFullYear();
@@ -25,7 +26,35 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
-  const [stressClassification] = useState<StressClassification>(null);
+  const [stressClassification, setStressClassification] = useState<StressClassification>(null);
+
+  // Classify the patient's latest stress reflection (any date). Doctor-only; nothing is stored.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), STRESS_CLASSIFICATION_TIMEOUT_MS);
+    setStressClassification({ status: 'loading' });
+    api.getPatientLogs(patientId, { type: 'stress', signal: controller.signal })
+      .then(async ({ logs: stressLogs }) => {
+        const latest = stressLogs[0];
+        if (!latest) {
+          if (active) setStressClassification({ status: 'no_reflection' });
+          return;
+        }
+        const result = await api.classifyStressReflection(patientId, latest.id, controller.signal);
+        if (!active) return;
+        if (result.status === 'ok' && result.label) setStressClassification({ status: 'ok', label: result.label, date: latest.date });
+        else if (result.status === 'unable_to_classify') setStressClassification({ status: 'unable_to_classify', date: latest.date });
+        else setStressClassification({ status: 'unavailable' });
+      })
+      .catch(() => { if (active) setStressClassification({ status: 'unavailable' }); })
+      .finally(() => window.clearTimeout(timeoutId));
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [patientId]);
 
   useEffect(() => {
     let active = true;
