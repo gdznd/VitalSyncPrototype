@@ -41,7 +41,11 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
     }
     try {
       const response = await api.registerDoctor({ name: fullName, email, password, specialty })
-      onLogin(response.user)
+      setEmail(response.user.email)
+      setPassword('')
+      setFullName('')
+      setView('login')
+      setSuccess('Account created. Give the temporary password to the physician; they must change it after their first sign-in.')
       setError('')
     } catch (err: any) {
       setError(err.message || 'An account already exists for that doctor email.')
@@ -84,12 +88,12 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
         {view === 'register' && (
           <>
             <h2>Register doctor account</h2>
-            <p className="login-subtitle">Create your VitalSync doctor account to access the dashboard.</p>
+            <p className="login-subtitle">Researchers can create an approved doctor account with a temporary password. The physician must change it after their first sign-in.</p>
             <form className="auth-form" onSubmit={submitRegister}>
               <label>Full name<input value={fullName} onChange={(e) => setFullName(e.target.value)} required /></label>
               <label>Specialty<select value={specialty} onChange={(e) => setSpecialty(e.target.value)}><option>Lifestyle Medicine</option><option>Cardiology</option><option>Rehab</option><option>Primary Care</option><option>General Medicine</option></select></label>
               <label>Email address<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-              <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+              <label>Temporary password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
               <button className="primary" style={{ width: '100%' }} type="submit">Create account</button>
               <div className="login-form-links"><button type="button" className="text-button" onClick={() => { setError(''); setSuccess(''); setView('login') }}>Back to login</button></div>
             </form>

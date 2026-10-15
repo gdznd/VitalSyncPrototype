@@ -88,7 +88,7 @@ def login(request):
             "email": account.email,
             "role": account.role,
             "iat": issued_at,
-            "exp": issued_at + timedelta(hours=24),
+            "exp": issued_at + timedelta(hours=4),
         },
         settings.JWT_SECRET,
         algorithm="HS256",
@@ -112,6 +112,16 @@ def register_doctor(request):
         return Response({"message": "A valid email and name are required."}, status=status.HTTP_400_BAD_REQUEST)
     if len(password) < 8:
         return Response({"message": "Password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+    if not settings.DOCTOR_EMAIL_ALLOWLIST:
+        return Response(
+            {"message": "Doctor registration is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if email not in settings.DOCTOR_EMAIL_ALLOWLIST:
+        return Response(
+            {"message": "This email is not approved for doctor account registration."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     initials = "".join(part[0] for part in name.split() if part)[:2].upper() or "DR"
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
@@ -122,7 +132,7 @@ def register_doctor(request):
                 email=email,
                 password_hash=password_hash,
                 role="doctor",
-                is_temporary_password=False,
+                is_temporary_password=True,
             )
             DoctorProfile.objects.create(
                 user=account,
@@ -134,23 +144,7 @@ def register_doctor(request):
     except IntegrityError:
         return Response({"message": "An account already exists for that email."}, status=status.HTTP_409_CONFLICT)
 
-    from datetime import datetime, timedelta, timezone
-    import jwt
-    from django.conf import settings
-
-    issued_at = datetime.now(timezone.utc)
-    token = jwt.encode(
-        {
-            "id": account.id,
-            "email": account.email,
-            "role": account.role,
-            "iat": issued_at,
-            "exp": issued_at + timedelta(hours=24),
-        },
-        settings.JWT_SECRET,
-        algorithm="HS256",
-    )
-    return Response({"token": token, "user": serialize_auth_user(account)}, status=status.HTTP_201_CREATED)
+    return Response({"user": serialize_auth_user(account)}, status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET"])

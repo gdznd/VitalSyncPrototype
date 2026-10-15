@@ -21,6 +21,11 @@ ALLOWED_HOSTS = [
     for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
     if host.strip()
 ]
+DOCTOR_EMAIL_ALLOWLIST = {
+    email.strip().lower()
+    for email in os.getenv("DOCTOR_EMAIL_ALLOWLIST", "").split(",")
+    if email.strip()
+}
 
 INSTALLED_APPS = [
     "django.contrib.admin",

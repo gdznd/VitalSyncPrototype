@@ -193,6 +193,7 @@ Render environment variables are entered in the Render dashboard, not committed 
 | `DJANGO_DEBUG=false` | Production debug setting |
 | `DJANGO_SECRET_KEY` | Private Django signing secret |
 | `JWT_SECRET` | Separate private token-signing secret |
+| `DOCTOR_EMAIL_ALLOWLIST` | Comma-separated exact email addresses allowed to create doctor accounts; an empty value denies doctor registration |
 | `DATABASE_URL` | Private Supabase Session pooler PostgreSQL URL (port 5432, SSL required) |
 | `DJANGO_ALLOWED_HOSTS` | Render API hostname, without `https://` |
 | `DJANGO_SECURE_SSL_REDIRECT=true` | Require HTTPS |
@@ -202,6 +203,8 @@ Render environment variables are entered in the Render dashboard, not committed 
 | `EMAIL_FROM_ADDRESS` | Verified sender email configured in Brevo |
 | `PATIENT_PORTAL_URL` | Patient portal URL used in invitation email; currently local, later the Vercel URL |
 | `CSRF_TRUSTED_ORIGINS` | Set exact HTTPS origins only if a CSRF-protected browser flow requires them |
+
+For the study workflow, researchers add only the physician emails needed for upcoming sessions, register those accounts with temporary passwords, and remove each email from the allowlist immediately after account creation. The existing duplicate-email response is **409 Conflict**. Registration returns the created account but does not issue a token; the physician signs in later and must change the temporary password before using normal doctor APIs. The allowlist is not email verification; account creation and the doctor account list must be checked by the researcher. Newly issued login tokens expire after four hours; this does not revoke tokens that were issued before the expiry change.
 
 Never expose or paste secret values into chat, screenshots, source code, frontend variables, or Git. Rotate any credential that has been exposed.
 
