@@ -162,15 +162,11 @@ export const api = {
     }),
 
   // Register a new doctor account
-  registerDoctor: async (account: { name: string; email: string; password: string; specialty: string }): Promise<LoginResponse> => {
-    const data = await fetchWithAuth<LoginResponse>('/auth/register-doctor', {
+  registerDoctor: async (account: { name: string; email: string; password: string; specialty: string }): Promise<{ user: AuthUser }> => {
+    return fetchWithAuth<{ user: AuthUser }>('/auth/register-doctor', {
       method: 'POST',
       body: JSON.stringify(account),
     });
-    if (data.token) {
-      setAuthToken(data.token);
-    }
-    return data;
   },
 
   // Patient Directory

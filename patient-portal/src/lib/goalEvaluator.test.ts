@@ -1,4 +1,4 @@
-import { evaluateGoal, StructuredGoal, HealthLog } from '../../../shared/goalEvaluator';
+import { evaluateGoal, resolveGoalTargetValue, StructuredGoal, HealthLog } from '../../../shared/goalEvaluator';
 import { getActivityMinutes, getMedicationNames, getSleepMinutes } from '../../../shared/logMetrics';
 
 function runTests() {
@@ -72,7 +72,13 @@ function runTests() {
     { id: 1, type: 'activity', date: '2026-09-02', time: '10:00', title: 'Running', detail: '120 minutes', payload: { minutes: 120 } }
   ];
   const res4 = evaluateGoal(goal4, logs4, '2026-09-07');
-  assert(res4.evaluable === true, 'Test 4 Failed: Weekly aggregate goal');
+  assert(
+    res4.evaluable === true
+      && res4.achievedCount === 4
+      && res4.expectedCount === 30
+      && res4.percentage === 13,
+    'Test 4 Failed: Weekly activity aggregate behavior changed',
+  );
 
   // 5. Food indicator goal
   const goal5: StructuredGoal = {
@@ -199,7 +205,48 @@ function runTests() {
   );
   assert(sleepGoal.achievedCount === 1, 'Structured sleep duration should count toward the goal');
 
-  console.log('All 10 VitalSync Goal Evaluator Tests passed successfully!');
+  const editedSleepGoal: StructuredGoal = {
+    ...goal10,
+    startDate: '2026-09-02',
+    reviewDate: '2026-09-02',
+    target: '9 hours',
+    targetValue: resolveGoalTargetValue('9 hours', goal10.targetValue),
+  };
+  const eightHoursAgainstNine = evaluateGoal(
+    editedSleepGoal,
+    [{ id: 4, type: 'sleep', date: '2026-09-02', time: '22:00', title: 'Sleep', detail: 'display text', payload: { durationMinutes: 480 } }],
+    '2026-09-02',
+  );
+  assert(
+    eightHoursAgainstNine.achievedCount === 0
+      && eightHoursAgainstNine.expectedCount === 1
+      && eightHoursAgainstNine.percentage === 0,
+    'An 8-hour log must not meet an edited 9-hour daily sleep target',
+  );
+
+  const nineHoursAgainstNine = evaluateGoal(
+    editedSleepGoal,
+    [{ id: 5, type: 'sleep', date: '2026-09-02', time: '22:00', title: 'Sleep', detail: 'display text', payload: { durationMinutes: 540 } }],
+    '2026-09-02',
+  );
+  assert(
+    nineHoursAgainstNine.achievedCount === 1 && nineHoursAgainstNine.percentage === 100,
+    'A 9-hour log must meet an edited 9-hour daily sleep target',
+  );
+
+  const weeklySleepGoal: StructuredGoal = { ...goal10, frequency: 'Weekly' };
+  const weeklySleepResult = evaluateGoal(
+    weeklySleepGoal,
+    [{ id: 6, type: 'sleep', date: '2026-09-02', time: '22:00', title: 'Sleep', detail: 'display text', payload: { durationMinutes: 480 } }],
+    '2026-09-03',
+  );
+  assert(
+    !weeklySleepResult.evaluable
+      && weeklySleepResult.progressText === 'Progress not automatically evaluated',
+    'Weekly sleep goals must not display misleading zero progress',
+  );
+
+  console.log('All VitalSync Goal Evaluator Tests passed successfully!');
 }
 
 function assert(condition: boolean, message: string) {

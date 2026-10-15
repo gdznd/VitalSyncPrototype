@@ -11,13 +11,19 @@ const defaultPreferences: DoctorPreferencesDto = {
   notifications: { dashboard: true, messages: true, reminders: true, activity: true },
 }
 
-export function DoctorSettingsPage() {
+export function DoctorSettingsPage({
+  isTemporaryPassword = false,
+  onPasswordChanged,
+}: {
+  isTemporaryPassword?: boolean
+  onPasswordChanged?: () => void
+}) {
   const [preferences, setPreferences] = useState(defaultPreferences)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!isTemporaryPassword)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(isTemporaryPassword)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -26,13 +32,18 @@ export function DoctorSettingsPage() {
   const [passwordSaving, setPasswordSaving] = useState(false)
 
   useEffect(() => {
+    if (isTemporaryPassword) {
+      setPasswordDialogOpen(true)
+      setLoading(false)
+      return
+    }
     let active = true
     api.getAccountPreferences()
       .then(({ preferences: loaded }) => { if (active) setPreferences(loaded) })
       .catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Could not load settings.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [])
+  }, [isTemporaryPassword])
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -84,6 +95,7 @@ export function DoctorSettingsPage() {
       setConfirmPassword('')
       setPasswordSaved(true)
       setPasswordDialogOpen(false)
+      onPasswordChanged?.()
     } catch (requestError) {
       setPasswordError(requestError instanceof Error ? requestError.message : 'Could not update your password.')
     } finally {
@@ -92,7 +104,7 @@ export function DoctorSettingsPage() {
   }
 
   const closePasswordDialog = () => {
-    if (passwordSaving) return
+    if (passwordSaving || isTemporaryPassword) return
     setPasswordDialogOpen(false)
     setCurrentPassword('')
     setNewPassword('')
@@ -104,12 +116,12 @@ export function DoctorSettingsPage() {
     <section className="settings-page">
       <header className="patients-header">
         <div>
-          <h2>Settings</h2>
-          <p className="header-copy">Manage your workspace preferences and account security.</p>
+          <h2>{isTemporaryPassword ? 'Password update required' : 'Settings'}</h2>
+          <p className="header-copy">{isTemporaryPassword ? 'Change your temporary password before continuing to the doctor dashboard.' : 'Manage your workspace preferences and account security.'}</p>
         </div>
-        <button className="primary-button" type="button" onClick={() => void save()} disabled={loading || saving}>
+        {!isTemporaryPassword && <button className="primary-button" type="button" onClick={() => void save()} disabled={loading || saving}>
           {saving ? 'Saving...' : 'Save preferences'}
-        </button>
+        </button>}
       </header>
       {loading && <p className="muted">Loading settings...</p>}
       {error && <p className="inline-note error" role="alert">{error}</p>}
@@ -176,13 +188,13 @@ export function DoctorSettingsPage() {
       {passwordDialogOpen && (
         <div className="modal-backdrop" onMouseDown={closePasswordDialog}>
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="doctor-password-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><h2 id="doctor-password-title">Change password</h2><p>Confirm your current password to set a new one.</p></div><button type="button" aria-label="Close" onClick={closePasswordDialog}>×</button></div>
+            <div className="modal-heading"><div><h2 id="doctor-password-title">{isTemporaryPassword ? 'Set your password' : 'Change password'}</h2><p>{isTemporaryPassword ? 'Enter the temporary password you received, then choose a new password.' : 'Confirm your current password to set a new one.'}</p></div>{!isTemporaryPassword && <button type="button" aria-label="Close" onClick={closePasswordDialog}>×</button>}</div>
             <form onSubmit={(event) => void changePassword(event)}>
               <div className="settings-field"><label htmlFor="doctor-current-password">Current password</label><input id="doctor-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></div>
               <div className="settings-field"><label htmlFor="doctor-new-password">New password</label><input id="doctor-new-password" type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></div>
               <div className="settings-field"><label htmlFor="doctor-confirm-password">Confirm new password</label><input id="doctor-confirm-password" type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div>
               {passwordError && <p className="inline-note error" role="alert">{passwordError}</p>}
-              <div className="modal-actions"><button className="secondary-button" type="button" onClick={closePasswordDialog} disabled={passwordSaving}>Cancel</button><button className="primary-button" type="submit" disabled={passwordSaving}>{passwordSaving ? 'Updating...' : 'Update password'}</button></div>
+              <div className="modal-actions">{!isTemporaryPassword && <button className="secondary-button" type="button" onClick={closePasswordDialog} disabled={passwordSaving}>Cancel</button>}<button className="primary-button" type="submit" disabled={passwordSaving}>{passwordSaving ? 'Updating...' : 'Update password'}</button></div>
             </form>
           </section>
         </div>

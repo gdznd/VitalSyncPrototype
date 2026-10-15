@@ -11,12 +11,12 @@ type Doctor = { id: number; name: string; initials: string; color?: string; spec
 import type { DoctorNoteDto, DoctorProfileDto, MonitoringHistoryEpisodeDto, PatientConversationMessage, TeamMessageDto } from './lib/api'
 import DoctorPicker from './components/DoctorPicker'
 import RecentActivitySummary from './components/RecentActivitySummary'
-import { evaluateGoal, type EvaluationType, type GoalFrequency } from '../../shared/goalEvaluator'
+import { evaluateGoal, resolveGoalTargetValue, type EvaluationType, type GoalFrequency } from '../../shared/goalEvaluator'
 
 // ... (constants and types remain unchanged, assume they are present)
 // Skipping replacing the whole file content due to size. I will carefully replace the imports and App function.
 
-type DoctorSession = { id: number; name: string; email: string; specialty: string; initials: string; color: string }
+type DoctorSession = { id: number; name: string; email: string; specialty: string; initials: string; color: string; isTemporaryPassword: boolean }
 type Patient = {
   id: number; name: string; initials: string; age: number; residence: string; care: string; phone: string; email: string
   detail: string; status: 'Needs attention' | 'On track' | 'Follow up'; priority: 'High' | 'Medium' | 'Low'; type: 'Out-patient' | 'In-patient'; color: string; assignedSince?: string; followUpDate: string; uniqueId: string; active: boolean; visibility: 'Assigned Only' | 'Selected Doctors' | 'All Doctors'; selectedDoctors?: number[]
@@ -82,7 +82,7 @@ const followUpPriority = (followUpDate: string): Patient['priority'] => {
   return days < 0 ? 'High' : days <= 3 ? 'Medium' : 'Low'
 }
 
-const defaultDoctorSession: DoctorSession = { id: 0, name: 'Doctor', email: '', specialty: 'VitalSync clinician', initials: 'DR', color: '#d9ecf1' }
+const defaultDoctorSession: DoctorSession = { id: 0, name: 'Doctor', email: '', specialty: 'VitalSync clinician', initials: 'DR', color: '#d9ecf1', isTemporaryPassword: false }
 
 const toDoctorSession = (user: AuthUser): DoctorSession => {
   const name = user.name?.trim() || user.email
@@ -93,6 +93,7 @@ const toDoctorSession = (user: AuthUser): DoctorSession => {
     specialty: user.specialty?.trim() || 'VitalSync clinician',
     initials: user.initials?.trim() || name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase(),
     color: user.display_color || '#d9ecf1',
+    isTemporaryPassword: user.is_temporary_password,
   }
 }
 
@@ -136,6 +137,7 @@ useEffect(() => {
       if (active) {
         setCurrentDoctor(toDoctorSession(user))
         setIsLoggedIn(true)
+        if (user.is_temporary_password) setActive('Settings')
       }
     } catch {
       if (active) setIsLoggedIn(false)
@@ -149,7 +151,7 @@ useEffect(() => {
 }, [])
 
 useEffect(() => {
-  if (!isLoggedIn) return;
+  if (!isLoggedIn || currentDoctor.isTemporaryPassword) return;
 
   async function loadPatients() {
     try {
@@ -192,11 +194,12 @@ useEffect(() => {
       isCurrent: doctor.is_current,
     }))))
     .catch((err) => console.error('Failed to fetch doctor directory:', err));
-}, [isLoggedIn]);
+}, [isLoggedIn, currentDoctor.isTemporaryPassword]);
 
 useEffect(() => {
-  if (!isLoggedIn) {
+  if (!isLoggedIn || currentDoctor.isTemporaryPassword) {
     setDoctorNotes([])
+    setNotesLoading(false)
     return
   }
   let active = true
@@ -206,10 +209,10 @@ useEffect(() => {
     .catch((error) => { if (active) notify(`Could not load doctor notes: ${error.message}`) })
     .finally(() => { if (active) setNotesLoading(false) })
   return () => { active = false }
-}, [isLoggedIn])
+}, [isLoggedIn, currentDoctor.isTemporaryPassword])
 
 useEffect(() => {
-  if (!isLoggedIn) {
+  if (!isLoggedIn || currentDoctor.isTemporaryPassword) {
     setReminders([])
     return
   }
@@ -218,10 +221,10 @@ useEffect(() => {
     .then(({ patientIds }) => { if (active) setReminders(patientIds) })
     .catch((error) => { if (active) notify(`Could not load reminders: ${error.message}`) })
   return () => { active = false }
-}, [isLoggedIn])
+}, [isLoggedIn, currentDoctor.isTemporaryPassword])
 
 useEffect(() => {
-  if (!isLoggedIn || selectedPatientId === null) return;
+  if (!isLoggedIn || currentDoctor.isTemporaryPassword || selectedPatientId === null) return;
   let active = true;
 
   api.getProviderGoals(selectedPatientId)
@@ -229,7 +232,7 @@ useEffect(() => {
     .catch((err) => { if (active) notify(`Could not load assigned goals: ${err.message}`); });
 
   return () => { active = false; };
-}, [isLoggedIn, selectedPatientId]);
+}, [isLoggedIn, currentDoctor.isTemporaryPassword, selectedPatientId]);
 
   const notify = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(''), 2600) }
   const selectedPatient = records.find((patient) => patient.id === selectedPatientId) ?? null
@@ -339,7 +342,15 @@ useEffect(() => {
   }
   const returnToRegistry = () => { setSelectedPatientId(null); setActive('Registry'); window.scrollTo(0, 0) }
   const handleLogout = () => { clearAuthToken(); setIsLoggedIn(false); setSelectedPatientId(null); setActive('Registry') }
-  const selectNav = (item: string) => { setActive(item); notify(`${item} prototype view selected`) }
+  const selectNav = (item: string) => {
+    if (currentDoctor.isTemporaryPassword && item !== 'Settings') {
+      setActive('Settings')
+      notify('Change your temporary password to continue.')
+      return
+    }
+    setActive(item)
+    notify(`${item} prototype view selected`)
+  }
   const saveProviderGoals = async (goals: ProviderGoal[]) => {
     if (selectedPatientId === null) return;
     try {
@@ -354,7 +365,7 @@ useEffect(() => {
 const handleDoctorLogin = (user: AuthUser): void => {
   setCurrentDoctor(toDoctorSession(user))
   setIsLoggedIn(true)
-  setActive('Registry')
+  setActive(user.is_temporary_password ? 'Settings' : 'Registry')
 }
 const handleDoctorProfileUpdated = (profile: DoctorProfileDto) => {
   setCurrentDoctor((current) => ({
@@ -395,7 +406,9 @@ const handleDoctorProfileUpdated = (profile: DoctorProfileDto) => {
       <div className="brand"><span className="brand-mark">✦</span><span>VitalSync</span></div>
       <p className="workspace-label">CLINIC WORKSPACE</p>
       <nav className="mode-nav">
-        {selectedPatient ? (
+        {currentDoctor.isTemporaryPassword ? (
+          <button className="nav-item active" onClick={() => setActive('Settings')}>Change Password</button>
+        ) : selectedPatient ? (
           <>
             <button className="nav-item" onClick={returnToRegistry}>Return to Registry</button>
             <button className={active === 'Overview' ? 'nav-item active' : 'nav-item'} onClick={() => setActive('Overview')}>Overview</button>
@@ -425,7 +438,7 @@ const handleDoctorProfileUpdated = (profile: DoctorProfileDto) => {
         onDelete={handleDeleteNote} 
       />
     )}
-    {active !== 'Notes' && (active === 'Profile' ? <DoctorProfilePage onProfileUpdated={handleDoctorProfileUpdated} /> : active === 'Settings' ? <DoctorSettingsPage /> : active === 'Team' && !selectedPatient ? <TeamView doctors={directoryDoctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} providerGoals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSaveProviderGoals={saveProviderGoals} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={directoryDoctors} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />)}
+    {active !== 'Notes' && (active === 'Profile' ? <DoctorProfilePage onProfileUpdated={handleDoctorProfileUpdated} /> : active === 'Settings' ? <DoctorSettingsPage isTemporaryPassword={currentDoctor.isTemporaryPassword} onPasswordChanged={() => { setCurrentDoctor((current) => ({ ...current, isTemporaryPassword: false })); setActive('Registry') }} /> : active === 'Team' && !selectedPatient ? <TeamView doctors={directoryDoctors} /> : selectedPatient ? <PatientWorkspace patient={selectedPatient} active={active} providerGoals={providerGoals.filter((goal) => goal.patientUniqueId === selectedPatient.uniqueId)} currentDoctorName={currentDoctor.name} onSaveProviderGoals={saveProviderGoals} onReturn={returnToRegistry} onContact={() => setContactPatient(selectedPatient)} onReminder={() => toggleReminder(selectedPatient)} reminderSet={reminders.includes(selectedPatient.id)} onEdit={() => setFormPatient(selectedPatient)} onArchive={() => archivePatient(selectedPatient)} onUpdateFollowUp={updateFollowUpDate} onUpdateVisibility={updatePatientVisibility} doctors={directoryDoctors} /> : <PatientRegistry patients={records} onRequestOpen={setPendingPatient} onAdd={() => setShowAddPatient(true)} />)}
     </section>
     {contactPatient && <ContactModal patient={contactPatient} copied={copied} onMessage={() => openMessages(contactPatient)} onCopy={() => { setCopied(true); navigator.clipboard?.writeText(contactPatient.email); notify('Email address copied.'); window.setTimeout(() => setCopied(false), 1600) }} onClose={() => setContactPatient(null)} />}
     {formPatient && <PatientForm patient={formPatient} onSave={savePatient} onClose={() => setFormPatient(null)} />}
@@ -508,12 +521,13 @@ function GoalConfigurationModal({ patient, template, goal, currentDoctorName, on
     event.preventDefault(); 
     const tracking = goalTrackingOptions[trackingMode]
     const previousTrackingMode = getGoalTrackingMode(goal, template)
-    const targetValueText = target.match(/\d+(?:\.\d+)?/)?.[0]
     const targetValue = trackingMode === 'none'
       ? undefined
-      : goal && trackingMode === previousTrackingMode
-        ? goal.targetValue ?? undefined
-        : template?.targetValue ?? (targetValueText ? Number(targetValueText) : undefined)
+      : resolveGoalTargetValue(
+        target,
+        goal && trackingMode === previousTrackingMode ? goal.targetValue : undefined,
+        template?.targetValue,
+      )
     onSave({ 
       id: goal?.id ?? Date.now(), 
       patientUniqueId: patient.uniqueId, 

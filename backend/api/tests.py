@@ -827,7 +827,7 @@ class TemporaryPasswordEnforcementTests(SimpleTestCase):
     def authenticate_path(self, path):
         request = self.factory.get(path, HTTP_AUTHORIZATION="Bearer test-token")
         with (
-            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": "patient"}),
+            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": self.account.role}),
             patch("api.authentication.UserAccount.objects.get", return_value=self.account),
         ):
             return VitalSyncJWTAuthentication().authenticate(request)
@@ -858,6 +858,23 @@ class TemporaryPasswordEnforcementTests(SimpleTestCase):
     def test_regular_patient_can_reach_protected_resources(self):
         self.account.is_temporary_password = False
         account, _ = self.authenticate_path("/api/patient/profile")
+        self.assertIs(account, self.account)
+
+    def test_temporary_doctor_can_only_reach_password_setup_routes(self):
+        self.account.role = "doctor"
+        for path in ("/api/auth/me", "/api/auth/change-password"):
+            with self.subTest(path=path):
+                account, _ = self.authenticate_path(path)
+                self.assertIs(account, self.account)
+
+        for path in ("/api/doctor/profile", "/api/auth/change-password/code"):
+            with self.subTest(path=path), self.assertRaises(PermissionDenied):
+                self.authenticate_path(path)
+
+    def test_regular_doctor_can_reach_protected_resources(self):
+        self.account.role = "doctor"
+        self.account.is_temporary_password = False
+        account, _ = self.authenticate_path("/api/doctor/profile")
         self.assertIs(account, self.account)
 
 
@@ -1002,7 +1019,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             id=17,
             email="doctor@example.test",
             role="doctor",
-            is_temporary_password=False,
+            is_temporary_password=True,
             created_at=None,
         )
         profile = SimpleNamespace(
@@ -1017,10 +1034,11 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             patch("api.views.bcrypt.hashpw", return_value=b"hashed"),
             patch("api.views.bcrypt.gensalt", return_value=b"salt"),
             patch("api.views.UserAccount.objects.create", return_value=account) as create_account,
+            patch("api.views.settings.DOCTOR_EMAIL_ALLOWLIST", {"doctor@example.test"}),
             patch("api.views.DoctorProfile.objects.create") as create_profile,
             patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
             patch("api.views.transaction.atomic", return_value=nullcontext()),
-            patch("jwt.encode", return_value="signed-token"),
+            patch("jwt.encode", return_value="signed-token") as encode_token,
         ):
             response = register_doctor(
                 self.authenticated_request(
@@ -1036,13 +1054,58 @@ class ContractAcceptanceApiTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["user"]["role"], "doctor")
+        self.assertTrue(response.data["user"]["is_temporary_password"])
+        self.assertNotIn("token", response.data)
         create_account.assert_called_once_with(
             email="doctor@example.test",
             password_hash="hashed",
             role="doctor",
-            is_temporary_password=False,
+            is_temporary_password=True,
         )
         create_profile.assert_called_once()
+        encode_token.assert_not_called()
+
+    def test_doctor_registration_fails_closed_without_an_allowlist(self):
+        registration_data = {
+            "name": "Test Doctor",
+            "email": "doctor@example.test",
+            "password": "TestPassword123!",
+            "specialty": "General",
+        }
+        with (
+            patch("api.views.settings.DOCTOR_EMAIL_ALLOWLIST", set()),
+            patch("api.views.UserAccount.objects.create") as create_account,
+        ):
+            response = register_doctor(
+                self.authenticated_request(
+                    "/api/auth/register-doctor",
+                    data=registration_data,
+                )
+            )
+
+        self.assertEqual(response.status_code, 503)
+        create_account.assert_not_called()
+
+    def test_doctor_registration_rejects_an_unlisted_email(self):
+        registration_data = {
+            "name": "Test Doctor",
+            "email": "doctor@example.test",
+            "password": "TestPassword123!",
+            "specialty": "General",
+        }
+        with (
+            patch("api.views.settings.DOCTOR_EMAIL_ALLOWLIST", {"other@example.test"}),
+            patch("api.views.UserAccount.objects.create") as create_account,
+        ):
+            response = register_doctor(
+                self.authenticated_request(
+                    "/api/auth/register-doctor",
+                    data=registration_data,
+                )
+            )
+
+        self.assertEqual(response.status_code, 403)
+        create_account.assert_not_called()
 
     def test_doctor_login_returns_a_signed_token_and_role(self):
         account = SimpleNamespace(
@@ -1050,7 +1113,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             email="doctor@example.test",
             password_hash="stored-hash",
             role="doctor",
-            is_temporary_password=False,
+            is_temporary_password=True,
             created_at=None,
         )
         profile_query = Mock()
@@ -1069,7 +1132,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             patch("api.views.UserAccount.objects.filter") as filter_accounts,
             patch("api.views.bcrypt.checkpw", return_value=True) as check_password,
             patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
-            patch("jwt.encode", return_value="signed-token"),
+            patch("jwt.encode", return_value="signed-token") as encode_token,
         ):
             filter_accounts.return_value.first.return_value = account
             response = login(request)
@@ -1077,6 +1140,9 @@ class ContractAcceptanceApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["token"], "signed-token")
         self.assertEqual(response.data["user"]["role"], "doctor")
+        self.assertTrue(response.data["user"]["is_temporary_password"])
+        payload = encode_token.call_args.args[0]
+        self.assertEqual((payload["exp"] - payload["iat"]).total_seconds(), 4 * 60 * 60)
         check_password.assert_called_once_with(b"strong-pass", b"stored-hash")
 
     def test_doctor_patient_provisioning_sets_temporary_password_and_managing_doctor(self):
