@@ -18,7 +18,13 @@ from rest_framework.response import Response
 from django.views.decorators.http import require_GET
 
 from api.email_backend import EmailDeliveryError, email_is_configured
-from api.models import DoctorProfile, PasswordChangeVerification, PatientProfile, UserAccount
+from api.models import (
+    DoctorProfile,
+    DoctorRegistrationVerification,
+    PasswordChangeVerification,
+    PatientProfile,
+    UserAccount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +82,11 @@ def login(request):
     account = UserAccount.objects.filter(email=email.strip().lower()).first()
     if not account or not bcrypt.checkpw(password.encode(), account.password_hash.encode()):
         return Response({"message": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+    if account.role == "doctor" and not account.email_verified:
+        return Response(
+            {"message": "Verify your email address before signing in."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     from datetime import datetime, timedelta, timezone
     import jwt
@@ -112,19 +123,16 @@ def register_doctor(request):
         return Response({"message": "A valid email and name are required."}, status=status.HTTP_400_BAD_REQUEST)
     if len(password) < 8:
         return Response({"message": "Password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
-    if not settings.DOCTOR_EMAIL_ALLOWLIST:
+    if not email_is_configured():
         return Response(
-            {"message": "Doctor registration is not configured."},
+            {"message": "Email verification is not configured."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    if email not in settings.DOCTOR_EMAIL_ALLOWLIST:
-        return Response(
-            {"message": "This email is not approved for doctor account registration."},
-            status=status.HTTP_403_FORBIDDEN,
         )
 
     initials = "".join(part[0] for part in name.split() if part)[:2].upper() or "DR"
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    now = timezone.now()
+    code = f"{secrets.randbelow(1_000_000):06d}"
 
     try:
         with transaction.atomic():
@@ -132,7 +140,8 @@ def register_doctor(request):
                 email=email,
                 password_hash=password_hash,
                 role="doctor",
-                is_temporary_password=True,
+                is_temporary_password=False,
+                email_verified=False,
             )
             DoctorProfile.objects.create(
                 user=account,
@@ -141,10 +150,163 @@ def register_doctor(request):
                 initials=initials,
                 display_color="#d9ecf1",
             )
+            DoctorRegistrationVerification.objects.create(
+                user=account,
+                code_hash=make_password(code),
+                requested_at=now,
+                expires_at=now + timedelta(minutes=10),
+                attempts=0,
+            )
+            sent = EmailMessage(
+                subject="Verify your VitalSync doctor account",
+                body=(
+                    f"Your VitalSync doctor account verification code is {code}.\n\n"
+                    "This code expires in 10 minutes. If you did not create this "
+                    "account, you can ignore this email."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[email],
+            ).send(fail_silently=False)
+            if sent != 1:
+                raise EmailDeliveryError("Doctor verification email was not sent.")
     except IntegrityError:
         return Response({"message": "An account already exists for that email."}, status=status.HTTP_409_CONFLICT)
+    except (EmailDeliveryError, OSError, smtplib.SMTPException):
+        logger.exception("Doctor-registration verification email could not be sent")
+        return Response(
+            {"message": "Could not send the verification code. Please try again later."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
-    return Response({"user": serialize_auth_user(account)}, status=status.HTTP_201_CREATED)
+    return Response(
+        {"message": "A verification code was sent to the email address."},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def verify_doctor_registration(request):
+    email = request.data.get("email")
+    code = request.data.get("code")
+    if not isinstance(email, str) or not isinstance(code, str):
+        return Response(
+            {"message": "Email and verification code are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) or not re.fullmatch(r"\d{6}", code):
+        return Response(
+            {"message": "Enter a valid email address and six-digit verification code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    now = timezone.now()
+    with transaction.atomic():
+        account = UserAccount.objects.select_for_update().filter(email=email, role="doctor").first()
+        verification = (
+            DoctorRegistrationVerification.objects.select_for_update()
+            .filter(user_id=account.id)
+            .first()
+            if account
+            else None
+        )
+        if (
+            not account
+            or account.email_verified
+            or not verification
+            or verification.expires_at <= now
+        ):
+            return Response(
+                {"message": "The verification code is missing, expired, or invalid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if verification.attempts >= 5:
+            return Response(
+                {"message": "Too many incorrect attempts. Request a new verification code."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if not check_password(code, verification.code_hash):
+            verification.attempts += 1
+            verification.save(update_fields=["attempts"])
+            return Response(
+                {"message": "The verification code is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        UserAccount.objects.filter(id=account.id, role="doctor").update(email_verified=True)
+        verification.delete()
+
+    return Response({"message": "Email verified. You can now sign in."})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def resend_doctor_registration_code(request):
+    email = request.data.get("email")
+    if not isinstance(email, str):
+        return Response({"message": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+    email = email.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        return Response({"message": "Enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
+    if not email_is_configured():
+        return Response(
+            {"message": "Email verification is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    generic_response = {
+        "message": "If an unverified doctor account exists for this email, a verification code will be sent."
+    }
+
+    now = timezone.now()
+    try:
+        with transaction.atomic():
+            account = (
+                UserAccount.objects.select_for_update()
+                .filter(email=email, role="doctor", email_verified=False)
+                .first()
+            )
+            if not account:
+                return Response(generic_response)
+
+            existing = (
+                DoctorRegistrationVerification.objects.select_for_update()
+                .filter(user_id=account.id)
+                .first()
+            )
+            if existing and existing.requested_at > now - timedelta(seconds=60):
+                return Response(generic_response)
+
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            DoctorRegistrationVerification.objects.update_or_create(
+                user_id=account.id,
+                defaults={
+                    "code_hash": make_password(code),
+                    "requested_at": now,
+                    "expires_at": now + timedelta(minutes=10),
+                    "attempts": 0,
+                },
+            )
+            sent = EmailMessage(
+                subject="Verify your VitalSync doctor account",
+                body=(
+                    f"Your VitalSync doctor account verification code is {code}.\n\n"
+                    "This code expires in 10 minutes. If you did not create this "
+                    "account, you can ignore this email."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[email],
+            ).send(fail_silently=False)
+            if sent != 1:
+                raise EmailDeliveryError("Doctor verification email was not sent.")
+    except (EmailDeliveryError, OSError, smtplib.SMTPException):
+        logger.exception("Doctor-registration verification email could not be resent")
+        return Response(
+            {"message": "Could not send the verification code. Please try again later."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    return Response(generic_response)
 
 
 @api_view(["GET"])

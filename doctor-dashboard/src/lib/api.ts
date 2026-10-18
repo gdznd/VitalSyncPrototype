@@ -13,6 +13,7 @@ export type AuthUser = {
 
 type LoginResponse = { token: string; user: AuthUser };
 type CurrentUserResponse = { user: AuthUser };
+type MessageResponse = { message: string };
 type DoctorDirectoryEntry = { id: number; name: string; initials: string; color: string };
 export type DoctorProfileDto = {
   id: number;
@@ -162,12 +163,22 @@ export const api = {
     }),
 
   // Register a new doctor account
-  registerDoctor: async (account: { name: string; email: string; password: string; specialty: string }): Promise<{ user: AuthUser }> => {
-    return fetchWithAuth<{ user: AuthUser }>('/auth/register-doctor', {
+  registerDoctor: async (account: { name: string; email: string; password: string; specialty: string }): Promise<MessageResponse> => {
+    return fetchWithAuth<MessageResponse>('/auth/register-doctor', {
       method: 'POST',
       body: JSON.stringify(account),
     });
   },
+  verifyDoctorRegistration: (email: string, code: string) =>
+    fetchWithAuth<MessageResponse>('/auth/register-doctor/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    }),
+  resendDoctorRegistrationCode: (email: string) =>
+    fetchWithAuth<MessageResponse>('/auth/register-doctor/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
 
   // Patient Directory
   getPatients: (monitoringActive = true) => fetchWithAuth(`/patients?monitoring_active=${monitoringActive}`),

@@ -9,6 +9,7 @@ class UserAccount(models.Model):
     password_hash = models.CharField(max_length=255)
     role = models.CharField(max_length=20)
     is_temporary_password = models.BooleanField(blank=True, null=True)
+    email_verified = models.BooleanField(default=True)
     created_at = models.DateTimeField(blank=True, null=True)
 
     @property
@@ -36,6 +37,19 @@ class PasswordChangeVerification(models.Model):
     class Meta:
         managed = False
         db_table = "password_change_verifications"
+
+
+class DoctorRegistrationVerification(models.Model):
+    id = models.AutoField(primary_key=True)
+    user = models.OneToOneField(UserAccount, models.CASCADE, db_column="user_id")
+    code_hash = models.CharField(max_length=255)
+    requested_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        managed = False
+        db_table = "doctor_registration_verifications"
 
 
 class DoctorProfile(models.Model):

@@ -15,7 +15,7 @@ Patient Portal (React/Vite) ───┘                              │
 | Patient Portal | Patient-facing UI; calls Django for connected data | Local during development; Vercel planned |
 | Django REST Framework | Login, JWT authentication, authorization, validation, business rules, and database access | Render: `https://vitalsync-django-api.onrender.com` |
 | PostgreSQL | Persistent application data | Supabase |
-| Brevo | Sends patient invitation and password-change verification emails | Called by Django over HTTPS |
+| Brevo | Sends patient invitations, password-change codes, and doctor-registration verification emails | Called by Django over HTTPS |
 
 The frontends must call Django, not Supabase directly. Supabase credentials, Django/JWT secrets, and the Brevo API key are backend-only secrets. A frontend developer only needs the public Django API URL.
 
@@ -25,7 +25,7 @@ This is a synthetic/demo prototype. It is not approved for real participant or c
 
 - **Render — runs the Django API.** Use its dashboard to view deploys/logs, restart or redeploy the service, and manage backend environment variables. It does not host the PostgreSQL database.
 - **Supabase — hosts PostgreSQL.** Use its dashboard to inspect/manage the database, review migration state, and manage database access. Django is the only application component that should connect to it; do not put database credentials in either frontend.
-- **Brevo — delivers transactional email.** Use it to verify the sender and manage the email API key. Django calls Brevo for patient invitations and password-change codes; Brevo does not host the app or database.
+- **Brevo — delivers transactional email.** Use it to verify the sender and manage the email API key. Django calls Brevo for patient invitations, password-change codes, and doctor-registration verification; Brevo does not host the app or database.
 
 The request flow is: frontend → Render/Django → Supabase for data; for email, Django → Brevo. A frontend-only teammate normally needs none of the three provider dashboards.
 
@@ -172,6 +172,8 @@ When a backend change adds or alters a model/field:
 3. Coordinate with the backend owner, then apply the migration to Supabase once.
 4. Other developers pull the code; they do not re-apply an already recorded migration.
 
+Migration `0009_doctor_email_verification` adds doctor email-verification state and one-time-code storage. It has not been applied to the shared database; coordinate and back up the intended isolated test database before applying it. Do not run this migration against production without an explicit release decision.
+
 `backend/schema.sql` is a reference snapshot, not a script to run manually over the existing database.
 
 ## 7. Render configuration reference
@@ -193,7 +195,6 @@ Render environment variables are entered in the Render dashboard, not committed 
 | `DJANGO_DEBUG=false` | Production debug setting |
 | `DJANGO_SECRET_KEY` | Private Django signing secret |
 | `JWT_SECRET` | Separate private token-signing secret |
-| `DOCTOR_EMAIL_ALLOWLIST` | Comma-separated exact email addresses allowed to create doctor accounts; an empty value denies doctor registration |
 | `DATABASE_URL` | Private Supabase Session pooler PostgreSQL URL (port 5432, SSL required) |
 | `DJANGO_ALLOWED_HOSTS` | Render API hostname, without `https://` |
 | `DJANGO_SECURE_SSL_REDIRECT=true` | Require HTTPS |
@@ -204,7 +205,7 @@ Render environment variables are entered in the Render dashboard, not committed 
 | `PATIENT_PORTAL_URL` | Patient portal URL used in invitation email; currently local, later the Vercel URL |
 | `CSRF_TRUSTED_ORIGINS` | Set exact HTTPS origins only if a CSRF-protected browser flow requires them |
 
-For the study workflow, researchers add only the physician emails needed for upcoming sessions, register those accounts with temporary passwords, and remove each email from the allowlist immediately after account creation. The existing duplicate-email response is **409 Conflict**. Registration returns the created account but does not issue a token; the physician signs in later and must change the temporary password before using normal doctor APIs. The allowlist is not email verification; account creation and the doctor account list must be checked by the researcher. Newly issued login tokens expire after four hours; this does not revoke tokens that were issued before the expiry change.
+Doctor registration follows the normal email-verification flow. A registrant provides their account details, receives a six-digit code at the supplied address, and must verify that address before signing in. Codes expire after ten minutes; resend requests are rate-limited and verification attempts are capped. Existing accounts are treated as verified by default when the schema migration is applied. Duplicate email registration returns **409 Conflict**. Newly issued login tokens expire after four hours; this does not revoke tokens that were issued before the expiry change.
 
 Never expose or paste secret values into chat, screenshots, source code, frontend variables, or Git. Rotate any credential that has been exposed.
 
@@ -212,7 +213,7 @@ Never expose or paste secret values into chat, screenshots, source code, fronten
 
 - Local Django development can use Django's SMTP email backend and a test mailbox such as Ethereal.
 - The deployed Render service uses `api.email_backend.BrevoEmailBackend`, which calls Brevo's transactional email endpoint over HTTPS.
-- Both patient invitations and password-change verification codes use Django's configured email backend.
+- Patient invitations, patient password-change verification codes, and doctor-registration verification codes use Django's configured email backend.
 - The sender address must be verified in Brevo. The Brevo API key belongs only in Render's `BREVO_API_KEY`.
 - Render Free blocks common outbound SMTP ports, which is why hosted email uses the HTTPS API rather than Ethereal SMTP.
 
