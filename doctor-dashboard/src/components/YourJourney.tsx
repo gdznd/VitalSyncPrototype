@@ -26,9 +26,9 @@ export default function YourJourney({ observations, stressClassification = null,
           </div>
         ))}
         {nlpText && (
-          <div className="journey-item journey-item--nlp" style={{ borderLeft: stressClassification === 'HIGH_STRESS' ? '3px solid #e11d48' : '3px solid #0284c7', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', padding: '10px 12px', borderRadius: '6px', marginTop: '8px' }}>
+          <div className="journey-item journey-item--nlp" style={{ borderLeft: '3px solid #0284c7', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', padding: '10px 12px', borderRadius: '6px', marginTop: '8px' }}>
             <span className="journey-icon">🤖</span>
-            <p style={{ margin: 0, fontWeight: 500 }}>{nlpText}</p>
+            <p style={{ margin: 0, fontWeight: 500 }} aria-live="polite">{nlpText}</p>
           </div>
         )}
       </div>

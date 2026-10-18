@@ -1,4 +1,21 @@
-export type StressClassification = "HIGH_STRESS" | "LOW_NORMAL" | null;
+export type StressLabel = "NO_STRESS" | "MILD_STRESS" | "MODERATE_STRESS" | "HIGH_STRESS";
+
+// Doctor-only result of the stress classifier for the patient's latest stress reflection.
+// The classification is requested from the backend each time; it is not stored.
+export type StressClassification =
+  | { status: "loading" }
+  | { status: "no_reflection" }
+  | { status: "ok"; label: StressLabel; date: string }
+  | { status: "unable_to_classify"; date: string }
+  | { status: "unavailable" }
+  | null;
+
+export const STRESS_LABEL_TEXT: Record<StressLabel, string> = {
+  NO_STRESS: "No Stress",
+  MILD_STRESS: "Mild Stress",
+  MODERATE_STRESS: "Moderate Stress",
+  HIGH_STRESS: "High Stress",
+};
 
 export function deriveJourneyObservations(logs: any[], patientName: string = 'Patient'): string[] {
   const observations: string[] = [];
@@ -33,11 +50,17 @@ export function deriveJourneyObservations(logs: any[], patientName: string = 'Pa
 }
 
 export function getNlpObservation(stressClassification: StressClassification, patientName: string = 'Patient'): string | null {
-  if (stressClassification === "HIGH_STRESS") {
-    return `The latest stress reflection for ${patientName} was classified as High Stress by the prototype NLP module.`;
+  if (!stressClassification) return null;
+  switch (stressClassification.status) {
+    case "loading":
+      return "Checking the latest stress reflection…";
+    case "no_reflection":
+      return `${patientName} has no stress reflection to classify yet.`;
+    case "ok":
+      return `The latest stress reflection for ${patientName} (${stressClassification.date}) was classified as ${STRESS_LABEL_TEXT[stressClassification.label]} by the prototype stress classifier. This is a prototype indicator, not a clinical assessment.`;
+    case "unable_to_classify":
+      return `The latest stress reflection for ${patientName} (${stressClassification.date}) could not be classified because it has no usable text.`;
+    case "unavailable":
+      return "The stress classifier is unavailable right now, so no classification is shown.";
   }
-  if (stressClassification === "LOW_NORMAL") {
-    return `The latest stress reflection for ${patientName} was classified as Low/Normal Stress by the prototype NLP module.`;
-  }
-  return null;
 }

@@ -60,10 +60,11 @@ Being in the code does not make a feature a research variable.
 - Archive/reactivate while preserving patient accounts/history. Provider-goal statuses remain unchanged; inactive monitoring suspends provider-goal work.
 - Monitoring history derived from persisted monitoring lifecycle episodes.
 - A follow-up date with derived follow-up priority.
+- Stress classification (NLP/SVM): a four-class model (No/Mild/Moderate/High Stress) served by a doctor-only backend endpoint (`backend/api/stress_nlp.py`, `backend/api/stress_views.py`). The Doctor Dashboard shows the result for the patient's latest stress reflection in Your Journey; the Patient Portal never shows it. The result is returned on request and not stored. **Not yet deployed or tested end to end.** Master document: `NLP/NLP.md`.
 
 ### Not implemented
 
-- NLP/SVM, stress classification, and alerts. A mock alert panel exists in `App.tsx` but is never rendered.
+- Alerts. A mock alert panel exists in `App.tsx` but is never rendered.
 - A compliance report.
 - Offline sync.
 - Real-time updates.
@@ -105,13 +106,15 @@ Nothing in this section is final.
 
 ### NLP/SVM
 
-- **Not in the current functional research scope.**
-- Do not add it to the architecture, methodology, database, or evaluation unless the adviser explicitly reinstates it.
+- **In scope** (RQ2): a four-class, stress-only classifier. `NLP/NLP.md` is the master document.
+- Doctor-only output; not a diagnosis, score, or treatment recommendation; the classification result is not stored.
+- Dataset: 500 simulated texts (English, Filipino, mixed). Support is claimed for **English only**.
+- Never describe the classifier as integrated or operational in the participant-facing build until it is deployed and tested end to end.
 
 ### "Your Journey" observations
 
 - This is rule-based summary text generated from recent logs.
-- **Never** describe it as NLP, machine learning, SVM, AI, clinical prediction, or a diagnostic component.
+- **Never** describe these rule-based observations as NLP, machine learning, SVM, AI, clinical prediction, or a diagnostic component. The only NLP output is the separate, doctor-only stress classification line.
 - It may be described as a prototype or future-development concept.
 
 ### Priority

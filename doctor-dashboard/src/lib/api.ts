@@ -177,13 +177,20 @@ export const api = {
   getPatients: (monitoringActive = true) => fetchWithAuth(`/patients?monitoring_active=${monitoringActive}`),
   getDoctors: () => fetchWithAuth<{ doctors: (DoctorDirectoryEntry & { specialty: string; is_current: boolean })[] }>('/doctors'),
   getPatientById: (id: number) => fetchWithAuth(`/patients/${id}`),
-  getPatientLogs: (patientId: number, filters: { startDate?: string; endDate?: string; type?: 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit' } = {}) => {
+  getPatientLogs: (patientId: number, filters: { startDate?: string; endDate?: string; type?: 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit'; signal?: AbortSignal } = {}) => {
     const params = new URLSearchParams({ patient_id: String(patientId) });
     if (filters.startDate) params.set('start_date', filters.startDate);
     if (filters.endDate) params.set('end_date', filters.endDate);
     if (filters.type) params.set('type', filters.type);
-    return fetchWithAuth<{ logs: { id: number; patient_id: number; patientUniqueId: string | null; type: 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit'; date: string; time: string; title: string; detail: string; extra: string; payload: Record<string, unknown> }[] }>(`/logs?${params.toString()}`);
+    return fetchWithAuth<{ logs: { id: number; patient_id: number; patientUniqueId: string | null; type: 'food' | 'medication' | 'activity' | 'sleep' | 'stress' | 'social' | 'habit'; date: string; time: string; title: string; detail: string; extra: string; payload: Record<string, unknown> }[] }>(`/logs?${params.toString()}`, { signal: filters.signal });
   },
+  // Doctor-only: classify one stored stress reflection. The result is returned, not stored.
+  classifyStressReflection: (patientId: number, logId: number, signal?: AbortSignal) =>
+    fetchWithAuth<{ log_id: number; patient_id: number; label: 'NO_STRESS' | 'MILD_STRESS' | 'MODERATE_STRESS' | 'HIGH_STRESS' | null; status: 'ok' | 'unable_to_classify' | 'model_unavailable'; model_version: string | null }>(`/patients/${patientId}/stress-classification`, {
+      method: 'POST',
+      body: JSON.stringify({ log_id: logId }),
+      signal,
+    }),
   getPatientMessages: (patientId: number) =>
     fetchWithAuth<{ messages: PatientConversationMessage[] }>(`/patients/${patientId}/messages`),
   sendPatientMessage: (patientId: number, text: string, important: boolean) =>
