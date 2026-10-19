@@ -60,7 +60,7 @@ Being in the code does not make a feature a research variable.
 - Archive/reactivate while preserving patient accounts/history. Provider-goal statuses remain unchanged; inactive monitoring suspends provider-goal work.
 - Monitoring history derived from persisted monitoring lifecycle episodes.
 - A follow-up date with derived follow-up priority.
-- Stress classification (NLP/SVM): a four-class model (No/Mild/Moderate/High Stress) served by a doctor-only backend endpoint (`backend/api/stress_nlp.py`, `backend/api/stress_views.py`). The Doctor Dashboard shows the result for the patient's latest stress reflection in Your Journey; the Patient Portal never shows it. The result is returned on request and not stored. **Not yet deployed or tested end to end.** Master document: `NLP/NLP.md`.
+- Stress classification (NLP/SVM): a four-class model (No/Mild/Moderate/High Stress) served by a doctor-only backend endpoint (`backend/api/stress_nlp.py`, `backend/api/stress_views.py`). The Doctor Dashboard shows the result for the patient's latest stress reflection in Your Journey; the Patient Portal never shows it. The result is returned on request and not stored. Merged to `main` in PR #2 at `b6321bc` on October 18, 2026. E2E-01–19 passed on the isolated test setup with fictional data on October 14–15. After the deployment environment changed to Vercel Production → Render `vitalsync-nlp-test-api` → main Supabase, post-merge E2E-01, E2E-12, and E2E-13 smoke checks passed on October 19; the full 19-case suite was not rerun on that environment. Master document: `NLP/NLP.md`.
 
 ### Not implemented
 
