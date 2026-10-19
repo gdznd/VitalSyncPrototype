@@ -106,7 +106,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
             </form>
           </>
         )}
-        {(error || success) && <div className={error ? 'inline-note error' : 'inline-note success'}>{error || success}</div>}
+        {(error || success) && <div className={error ? 'inline-note error login-feedback' : 'inline-note success login-feedback'} role={error ? 'alert' : 'status'}>{error || success}</div>}
       </div>
     </div>
   )

@@ -10,11 +10,14 @@ export function PatientProfile({ patient, onContact, onReminder, reminderSet, on
   const [vis, setVis] = useState<Patient['visibility']>(patient.visibility)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [selectedDoctors, setSelectedDoctors] = useState<number[]>(patient.selectedDoctors ?? [])
+  const [activeTab, setActiveTab] = useState<'profile' | 'activity'>('profile')
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
   const handleFollowUp = (val: string) => { setFollowUp(val); onUpdateFollowUp(patient.id, val) }
   const handleVisibility = (v: Patient['visibility']) => { setVis(v); if (v !== 'Selected Doctors') onUpdateVisibility(patient.id, v); else setPickerOpen(true) }
   const selectedDoctorNames = doctors.filter((doctor) => selectedDoctors.includes(doctor.id)).map((doctor) => doctor.name)
-  return <section className="patient-profile"><button className="back-button" onClick={onBack}>← Return to Registry</button><article className="profile-hero"><div className="profile-person"><span className="avatar profile-avatar" style={{ background: patient.color }}>{patient.initials}</span><div><h2>{patient.name}</h2><p>{patient.age} years old · {patient.residence}</p><p className="care-label">{patient.care}</p></div></div><div className="profile-actions"><button onClick={onContact}>Contact</button><button onClick={onReminder}>{reminderSet ? 'Reminder set' : 'Set reminder'}</button><button className="edit-button" onClick={onEdit}>Manage</button><button className="archive-button" onClick={onArchive}>Archive monitoring</button></div></article>
-    <div className="profile-grid">
+  return <section className="patient-profile"><button className="back-button" onClick={onBack}>← Return to Registry</button><article className="profile-hero"><div className="profile-person"><span className="avatar profile-avatar" style={{ background: patient.color }}>{patient.initials}</span><div><h2>{patient.name}</h2><p>{patient.age} years old · {patient.residence}</p><p className="care-label">{patient.care}</p></div></div><div className="profile-actions"><button onClick={onContact}>Contact</button><button onClick={onReminder}>{reminderSet ? 'Reminder set' : 'Set reminder'}</button><button className="edit-button" onClick={onEdit}>Manage</button><button className="archive-button" onClick={() => setArchiveConfirmOpen(true)}>Archive monitoring</button></div></article>
+    <div className="registry-tabs profile-tabs" role="tablist" aria-label="Patient details"><button type="button" className={activeTab === 'profile' ? 'active' : ''} role="tab" aria-selected={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>Profile</button><button type="button" className={activeTab === 'activity' ? 'active' : ''} role="tab" aria-selected={activeTab === 'activity'} onClick={() => setActiveTab('activity')}>Activity</button></div>
+    {activeTab === 'profile' && <div className="profile-grid">
       <article className="profile-card"><h3>Patient information</h3>
         <dl>
           <div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div>
@@ -33,8 +36,9 @@ export function PatientProfile({ patient, onContact, onReminder, reminderSet, on
         </dl>
       </article>
       <article className="profile-card"><h3>Today’s log</h3><div className="log-summary"><span>🍽</span><div><strong>Breakfast submitted</strong><p>8:14 AM · On time</p></div></div><div className="log-summary"><span>☾</span><div><strong>Sleep pending</strong><p>Due by 10:00 AM</p></div></div></article>
-    </div>
-    <RecentActivitySummary patientId={patient.id} patientName={patient.name} />
+    </div>}
+    {activeTab === 'activity' && <RecentActivitySummary patientId={patient.id} patientName={patient.name} />}
     {pickerOpen && <div className="modal-backdrop" onMouseDown={() => setPickerOpen(false)}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" onClick={() => { onUpdateVisibility(patient.id, 'Selected Doctors', selectedDoctors); setPickerOpen(false) }}>Confirm selection</button></div></section></div>}
+    {archiveConfirmOpen && <div className="modal-backdrop" onMouseDown={() => setArchiveConfirmOpen(false)}><section className="modal archive-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="archive-confirmation-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2 id="archive-confirmation-title">Archive monitoring?</h2><p>This removes the patient from active monitoring.</p></div><button type="button" aria-label="Close confirmation" onClick={() => setArchiveConfirmOpen(false)}>×</button></div><dl className="confirmation-details"><div><dt>Patient</dt><dd>{patient.name}</dd></div><div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div></dl><div className="modal-actions"><button type="button" onClick={() => setArchiveConfirmOpen(false)}>Cancel</button><button type="button" className="primary archive-confirm-button" onClick={() => { onArchive(); setArchiveConfirmOpen(false) }}>Archive monitoring</button></div></section></div>}
   </section>
 }
