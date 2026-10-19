@@ -27,6 +27,7 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
   const [customEnd, setCustomEnd] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [stressClassification, setStressClassification] = useState<StressClassification>(null);
+  const [stressRetryKey, setStressRetryKey] = useState(0);
 
   // Classify the patient's latest stress reflection (any date). Doctor-only; nothing is stored.
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [patientId]);
+  }, [patientId, stressRetryKey]);
 
   useEffect(() => {
     let active = true;
@@ -230,7 +231,12 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
         </div>
       </section>
 
-      <YourJourney observations={observations} stressClassification={stressClassification} patientName={patientName || 'Patient'} />
+      <YourJourney
+        observations={observations}
+        stressClassification={stressClassification}
+        patientName={patientName || 'Patient'}
+        onRetryClassification={() => setStressRetryKey((key) => key + 1)}
+      />
     </section>
   );
 }

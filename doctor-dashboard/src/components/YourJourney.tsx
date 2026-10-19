@@ -5,9 +5,15 @@ interface YourJourneyProps {
   observations: string[];
   stressClassification?: StressClassification;
   patientName?: string;
+  onRetryClassification: () => void;
 }
 
-export default function YourJourney({ observations, stressClassification = null, patientName = 'Patient' }: YourJourneyProps) {
+export default function YourJourney({
+  observations,
+  stressClassification = null,
+  patientName = 'Patient',
+  onRetryClassification,
+}: YourJourneyProps) {
   const nlpText = getNlpObservation(stressClassification, patientName);
 
   return (
@@ -28,7 +34,14 @@ export default function YourJourney({ observations, stressClassification = null,
         {nlpText && (
           <div className="journey-item journey-item--nlp" style={{ borderLeft: '3px solid #0284c7', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', padding: '10px 12px', borderRadius: '6px', marginTop: '8px' }}>
             <span className="journey-icon">🤖</span>
-            <p style={{ margin: 0, fontWeight: 500 }} aria-live="polite">{nlpText}</p>
+            <div className="journey-nlp-content">
+              <p style={{ margin: 0, fontWeight: 500 }} aria-live="polite">{nlpText}</p>
+              {stressClassification?.status === 'unavailable' && (
+                <button className="journey-retry" type="button" onClick={onRetryClassification}>
+                  Retry classification
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

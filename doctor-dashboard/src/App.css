@@ -140,6 +140,10 @@
 .journey-items { display: grid; gap: 10px; }
 .journey-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; background: #e8f5f4; border-radius: 10px; font-size: 13px; color: var(--text-ink); }
 .journey-icon { color: var(--teal); font-weight: 800; margin-top: 1px; }
+.journey-nlp-content { flex: 1; min-width: 0; }
+.journey-retry { margin-top: 8px; padding: 6px 10px; border: 1px solid var(--teal); border-radius: 8px; background: var(--bg-panel); color: var(--teal); font: inherit; font-weight: 700; cursor: pointer; }
+.journey-retry:hover { background: #e8f5f4; }
+.journey-retry:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .activity-bars { display: grid; gap: 8px; }
 .bar-row { display: grid; grid-template-columns: 120px 1fr 50px; align-items: center; gap: 10px; font-size: 12px; }
 .bar-label { color: var(--text-ink); font-weight: 600; }

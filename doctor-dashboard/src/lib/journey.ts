@@ -61,6 +61,6 @@ export function getNlpObservation(stressClassification: StressClassification, pa
     case "unable_to_classify":
       return `The latest stress reflection for ${patientName} (${stressClassification.date}) could not be classified because it has no usable text.`;
     case "unavailable":
-      return "The stress classifier is unavailable right now, so no classification is shown.";
+      return "The stress classifier did not respond, so no classification is shown. The service may be waking after inactivity; wait briefly, then retry.";
   }
 }
