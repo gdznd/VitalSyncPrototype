@@ -9,8 +9,7 @@ import { DoctorSettingsPage } from './components/DoctorSettingsPage'
 import { LoginPage } from './components/LoginPage'
 type Doctor = { id: number; name: string; initials: string; color?: string; specialty?: string; isCurrent?: boolean }
 import type { DoctorNoteDto, DoctorProfileDto, MonitoringHistoryEpisodeDto, PatientConversationMessage, TeamMessageDto } from './lib/api'
-import DoctorPicker from './components/DoctorPicker'
-import RecentActivitySummary from './components/RecentActivitySummary'
+import { PatientProfile } from './components/PatientProfile'
 import { evaluateGoal, type EvaluationType, type GoalFrequency } from '../../shared/goalEvaluator'
 
 // ... (constants and types remain unchanged, assume they are present)
@@ -536,90 +535,9 @@ function GoalConfigurationModal({ patient, template, goal, currentDoctorName, on
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal goal-config-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>{goal ? 'Edit Goal' : 'Configure Goal'}</h2><p>Set the details for {patient.name}.</p></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label>Goal<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Nutrition</option><option>Physical Activity</option><option>Sleep</option><option>Stress</option><option>Social Connectedness</option><option>Medication</option><option>Other</option></select></label><label>Target<input required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="e.g. 8 glasses/day" /></label><label>Frequency<select value={frequency} onChange={(event) => setFrequency(event.target.value as GoalFrequency)}><option>Daily</option><option>Weekdays</option><option>Weekly</option></select></label><label className="full-width">Progress measurement<select value={trackingMode} onChange={(event) => setTrackingMode(event.target.value as GoalTrackingMode)}>{Object.entries(goalTrackingOptions).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}</select></label><label>Start date<input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label><label>Review date<input required type="date" value={reviewDate} onChange={(event) => setReviewDate(event.target.value)} /></label><label className="full-width">Instructions / Notes<textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Optional instructions for the patient" /></label></div><div className="modal-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit">{goal ? 'Save changes' : 'Assign Goal'}</button></div></form></div>
 }
 
-function PatientProfile({ patient, onContact, onReminder, reminderSet, onBack, onEdit, onArchive, onUpdateFollowUp, onUpdateVisibility, doctors }: { patient: Patient; onContact: () => void; onReminder: () => void; reminderSet: boolean; onBack: () => void; onEdit: () => void; onArchive: () => void; onUpdateFollowUp: (id: number, newDate: string) => void; onUpdateVisibility: (id: number, v: Patient['visibility'], selected?: number[]) => Promise<boolean>; doctors: Doctor[] }) {
-  const [followUp, setFollowUp] = useState(patient.followUpDate)
-  const [vis, setVis] = useState<Patient['visibility']>(patient.visibility)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [selectedDoctors, setSelectedDoctors] = useState<number[]>(patient.selectedDoctors ?? [])
-  const [visibilitySaving, setVisibilitySaving] = useState(false)
-  const handleFollowUp = (val: string) => { setFollowUp(val); onUpdateFollowUp(patient.id, val) }
-  const saveVisibility = async (visibility: Patient['visibility'], doctorIds: number[] = []) => {
-    setVisibilitySaving(true)
-    const saved = await onUpdateVisibility(patient.id, visibility, doctorIds)
-    setVisibilitySaving(false)
-    if (saved) {
-      setVis(visibility)
-      setSelectedDoctors(doctorIds)
-      if (visibility === 'Selected Doctors') setPickerOpen(false)
-    }
-  }
-  const handleVisibility = (visibility: Patient['visibility']) => {
-    if (visibility === 'Selected Doctors') {
-      setPickerOpen(true)
-      return
-    }
-    void saveVisibility(visibility)
-  }
-  const selectedDoctorNames = doctors.filter((doctor) => selectedDoctors.includes(doctor.id)).map((doctor) => doctor.name)
-  return <section className="patient-profile"><button className="back-button" onClick={onBack}>← Return to Registry</button><article className="profile-hero"><div className="profile-person"><span className="avatar profile-avatar" style={{ background: patient.color }}>{patient.initials}</span><div><h2>{patient.name}</h2><p>{patient.age} years old · {patient.residence}</p><p className="care-label">{patient.care}</p></div></div><div className="profile-actions"><button onClick={onContact}>Contact</button><button onClick={onReminder}>{reminderSet ? 'Reminder enabled' : 'Enable reminder'}</button><button className="edit-button" onClick={onEdit}>Manage</button><button className="archive-button" onClick={onArchive}>Archive monitoring</button></div></article>
-    <div className="profile-grid">
-      <article className="profile-card"><h3>Patient information</h3>
-        <dl>
-          <div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div>
-          <div><dt>Visibility</dt><dd>
-            <select className="patient-control patient-visibility-control" aria-label="Patient visibility" value={vis} disabled={visibilitySaving} onChange={(e) => handleVisibility(e.target.value as Patient['visibility'])}>
-              <option>Assigned Only</option>
-              <option>Selected Doctors</option>
-              <option>All Doctors</option>
-            </select>
-            {vis === 'Selected Doctors' && <div className="selected-doctors-summary"><span>{selectedDoctorNames.length ? selectedDoctorNames.join(', ') : 'No doctors selected'}</span><button type="button" onClick={() => setPickerOpen(true)}>Open Doctor Picker</button></div>}
-          </dd></div>
-          <div><dt>Patient type</dt><dd>{patient.type}</dd></div>
-          <div><dt>Follow-up</dt><dd><input className="patient-control patient-follow-up-control" aria-label="Patient follow-up date" type="date" value={followUp} onChange={(e) => handleFollowUp(e.target.value)} /></dd></div>
-          <div><dt>Priority level</dt><dd><span className={`priority ${followUpPriority(followUp).toLowerCase()}`}>{followUpPriority(followUp)}</span></dd></div>
-          <div><dt>Care focus</dt><dd>{patient.care}</dd></div>
-        </dl>
-      </article>
-      <article className="profile-card"><h3>Today’s log</h3><PatientTodayLogSummary patientId={patient.id} /></article>
-    </div>
-    <RecentActivitySummary patientId={patient.id} patientName={patient.name} />
-    {pickerOpen && <div className="modal-backdrop" onMouseDown={() => { if (!visibilitySaving) setPickerOpen(false) }}><section className="modal doctor-picker-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Select doctors</h2><p>Choose which doctors can access this patient.</p></div><button type="button" disabled={visibilitySaving} onClick={() => setPickerOpen(false)}>×</button></div><DoctorPicker doctors={doctors} selectedIds={selectedDoctors} onChange={setSelectedDoctors} /><div className="modal-actions"><button type="button" disabled={visibilitySaving} onClick={() => setPickerOpen(false)}>Cancel</button><button type="button" className="primary" disabled={visibilitySaving} onClick={() => void saveVisibility('Selected Doctors', selectedDoctors)}>{visibilitySaving ? 'Saving...' : 'Confirm selection'}</button></div></section></div>}
-  </section>
-}
-
 function ContactModal({ patient, copied, onMessage, onCopy, onClose }: { patient: Patient; copied: boolean; onMessage: () => void; onCopy: () => void; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal contact-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><h2>Contact {patient.name}</h2><p>Reach them securely through VitalSync.</p></div><button onClick={onClose}>×</button></div><div className="contact-buttons single"><button onClick={onMessage}><span>◌</span>Open secure message</button></div><div className="email-row"><div><small>EMAIL ADDRESS</small><strong>{patient.email}</strong></div><button onClick={onCopy}>{copied ? 'Copied!' : 'Copy email'}</button></div></section></div> }
 function OpenPatientModal({ patient, onOpen, onClose }: { patient: Patient; onOpen: () => void; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><h2>Open patient workspace?</h2><p>Confirm the patient before entering their chart.</p></div><button onClick={onClose}>×</button></div><dl className="confirmation-details"><div><dt>Patient name</dt><dd>{patient.name}</dd></div><div><dt>Unique ID</dt><dd>{patient.uniqueId}</dd></div><div><dt>Email</dt><dd>{patient.email}</dd></div><div><dt>Priority</dt><dd>{patient.priority}</dd></div></dl><div className="modal-actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={onOpen}>Open Patient</button></div></section></div> }
 
-function PatientTodayLogSummary({ patientId }: { patientId: number }) {
-  const [logs, setLogs] = useState<GoalLog[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError('')
-    api.getPatientLogs(patientId)
-      .then(({ logs: patientLogs }: { logs: GoalLog[] }) => {
-        if (active) setLogs(patientLogs.filter((log) => log.date === new Date().toISOString().slice(0, 10)).sort((a, b) => a.time.localeCompare(b.time)))
-      })
-      .catch((requestError) => {
-        if (active) setError(requestError instanceof Error ? requestError.message : 'Could not load today’s logs.')
-      })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [patientId])
-
-  if (loading) return <p className="muted">Loading today’s logs...</p>
-  if (error) return <p className="inline-note error" role="alert">{error}</p>
-  if (logs.length === 0) return <p className="muted">No logs recorded today.</p>
-
-  const labels: Record<string, string> = {
-    food: 'Food', medication: 'Medication', activity: 'Physical activity', sleep: 'Sleep',
-    stress: 'Stress reflection', social: 'Social reflection', habit: 'Lifestyle habits',
-  }
-  return <div>{logs.map((log) => <div className="log-summary" key={log.id}><span>•</span><div><strong>{labels[log.type] ?? log.type}: {log.title}</strong><p>{log.time} · {log.detail}</p></div></div>)}</div>
-}
 
 function AddPatientModal({ onNew, onExisting, onClose, patients }: { onNew: (name: string, email: string, phone?: string) => void; onExisting: (uniqueId: string) => void; onClose: () => void; patients: Patient[] }) {
   const [mode, setMode] = useState<'new' | 'existing'>('new')
