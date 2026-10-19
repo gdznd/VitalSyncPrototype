@@ -147,13 +147,18 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
 
   return (
     <section className="summary-page">
-      <div className="section-header summary-heading"><div><p className="eyebrow">SUMMARY</p><h2>Your recent activity</h2><p>See the patterns behind the small choices you are making.</p></div><span className="status-chip">{filtered.length} entries</span></div>
+      <div className="section-header summary-heading"><div><p className="eyebrow">SUMMARY</p><h2>Your recent activity</h2><p className="header-copy">See the patterns behind the small choices you are making.</p></div><span className="status-chip active" style={{ fontSize: '11px', fontWeight: 700 }}>{filtered.length} entries</span></div>
       {loading && <p className="muted">Loading patient logs...</p>}
       {loadError && <p className="login-error" role="alert">{loadError}</p>}
 
       <div className="timeframe-select">
-        <label>Timeframe<select value={range} onChange={e => setRange(e.target.value as any)}>{ranges.map(r => <option key={r}>{r}</option>)}</select></label>
-        {range === 'Custom' && <div className="field-grid"><label>Start Date<input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} /></label><label>End Date<input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} /></label></div>}
+        <label style={{ display: 'grid', gap: '6px', fontSize: '11px', fontWeight: 700, color: '#667981' }}>
+          Timeframe
+          <select className="patient-control" value={range} onChange={e => setRange(e.target.value as any)}>
+            {ranges.map(r => <option key={r}>{r}</option>)}
+          </select>
+        </label>
+        {range === 'Custom' && <div className="form-grid" style={{ marginTop: '12px' }}><label>Start Date<input className="patient-control" type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} /></label><label>End Date<input className="patient-control" type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} /></label></div>}
       </div>
 
       <div className="cards-grid">
@@ -204,9 +209,9 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
             <h3>History</h3>
             <p>Review past health logs filtered by date.</p>
           </div>
-          <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+          <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 700, color: '#667981' }}>
             <span>Select date:</span>
-            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ minHeight: '36px' }} />
+            <input className="patient-control" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ minHeight: '36px' }} />
           </label>
         </div>
         <div className="timeline">
@@ -242,5 +247,14 @@ export default function RecentActivitySummary({ patientId, patientName }: { pati
 }
 
 function Stat({ icon, label, value, note }: { icon: string; label: string; value: string; note: string }) {
-  return <article className="summary-card summary-stat"><span>{icon}</span><div><p>{label}</p><strong>{value}</strong><small>{note}</small></div></article>;
+  return (
+    <article className="summary-card summary-stat">
+      <span>{icon}</span>
+      <div>
+        <p style={{ margin: 0, fontSize: '12px', fontWeight: 500, color: '#75848c' }}>{label}</p>
+        <strong style={{ display: 'block', margin: '3px 0', color: 'var(--ink)', fontFamily: 'Manrope, sans-serif', fontSize: '25px', letterSpacing: '-.7px' }}>{value}</strong>
+        <small style={{ color: '#829098', fontSize: '10px' }}>{note}</small>
+      </div>
+    </article>
+  );
 }

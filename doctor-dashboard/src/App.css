@@ -120,7 +120,7 @@
 .registry-tabs { display: flex; gap: 4px; padding: 4px; border-radius: 8px; background: #edf3f4; }
 .registry-tabs button { padding: 8px 12px; border: 0; border-radius: 6px; color: #60737b; background: transparent; font-size: 11px; font-weight: 700; }
 .registry-tabs button.active { color: #fff; background: var(--teal); }
-.profile-tabs { width: max-content; margin-top: 16px; }
+.profile-tabs { width: max-content; margin-top: 16px; margin-bottom: 20px; }
 .archive-confirmation-modal .modal-heading p { max-width: 320px; }
 .archive-confirm-button { background: #b75e5b !important; border-color: #b75e5b !important; }
 .registry-controls input { width: min(300px, 100%); padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-panel); font: inherit; font-size: 12px; }
