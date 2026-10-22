@@ -11,9 +11,9 @@ Patient Portal (React/Vite) ───┘                              │
 
 | Part | Responsibility | Current location |
 |---|---|---|
-| Doctor Dashboard | Doctor-facing UI; calls Django for connected data | Local during development; Vercel planned |
-| Patient Portal | Patient-facing UI; calls Django for connected data | Local during development; Vercel planned |
-| Django REST Framework | Login, JWT authentication, authorization, validation, business rules, and database access | Render: `https://vitalsync-django-api.onrender.com` |
+| Doctor Dashboard | Doctor-facing UI; calls Django for connected data | Local development and Vercel Production: `https://vital-sync-prototype-doctor-dashboard.vercel.app/` |
+| Patient Portal | Patient-facing UI; calls Django for connected data | Local development and Vercel Production: `https://vital-sync-prototype-patient-portal.vercel.app/` |
+| Django REST Framework | Login, JWT authentication, authorization, validation, business rules, and database access | Render service `vitalsync-nlp-test-api` |
 | PostgreSQL | Persistent application data | Supabase |
 | Brevo | Sends patient invitation and password-change verification emails | Called by Django over HTTPS |
 
@@ -29,25 +29,137 @@ This is a synthetic/demo prototype. It is not approved for real participant or c
 
 The request flow is: frontend → Render/Django → Supabase for data; for email, Django → Brevo. A frontend-only teammate normally needs none of the three provider dashboards.
 
-## 2. Current deployment status
+### Core backend code, in plain language
 
-- [x] Django API deployed to Render; health endpoint returns `status: ok` and a database timestamp.
-- [x] Render Django API connects to the Supabase PostgreSQL database.
-- [x] Supabase schema migrations are applied. Supabase is the database host; it is not running the Django API.
-- [x] Automated backend suite: 60 tests pass; Django system check and static collection pass.
-- [x] Reported manual Render checks: doctor login/registry, patient-to-doctor data round trip, patient isolation, visibility, goals, messaging, archive/reactivate, invitation email, and password-change verification email.
-- [x] Both local frontends have an ignored `.env.local` configured to call the Render API.
-- [ ] Confirm any credentials exposed in earlier screenshots/messages have been rotated or revoked; update Render/local configuration with the replacements.
-- [ ] Deploy both frontends to Vercel. Afterward update Render's `CORS_ALLOWED_ORIGINS` and `PATIENT_PORTAL_URL` to the exact deployed URLs.
-- [ ] Before any research use, meet the ethics, privacy, security, and research-ready requirements. Until then, use only synthetic/demo data.
+The browser sends an HTTP request to Django. Django checks the request and the signed-in account, uses Django's ORM to read or write PostgreSQL, then returns JSON. These are the main pieces of that path:
 
-The live API base URL to give the frontend team is:
+#### 1. Database connection — configuration, not the database itself
 
-```text
-https://vitalsync-django-api.onrender.com/api
+In [`settings.py`](./backend/vitalsync_api/settings.py):
+
+```python
+DATABASES = {
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        conn_health_checks=True,
+    )
+}
 ```
 
-Render's Free web service can sleep after inactivity; the first request after sleep may be delayed. Use this deployment for demo/testing, not as a production healthcare service.
+**What it does:** Django reads `DATABASE_URL` from the private backend environment and uses it for database connections. Locally it can point to local PostgreSQL; Render points to the hosted Supabase PostgreSQL database. This setting connects the API to the database; it does not create the database or its tables. Keep the URL and all signing keys out of source code and frontend settings.
+
+#### 2. URL routing — API layer
+
+In [`urls.py`](./backend/vitalsync_api/urls.py):
+
+```python
+path("api/logs", lifestyle_logs, name="lifestyle-logs"),
+path(
+    "api/patients/<int:patient_id>/stress-classification",
+    stress_classification,
+    name="stress-classification",
+),
+```
+
+**What it does:** Django matches an incoming URL and HTTP method to the Python function that handles it. These are API routes—not database tables. For example, `/api/logs` is handled by `lifestyle_logs`; the stress-classification route is handled by `stress_classification`.
+
+#### 3. Login and request authentication — API/security layer
+
+The login handler in [`views.py`](./backend/api/views.py) checks the submitted password against its stored bcrypt hash and signs a time-limited JWT:
+
+```python
+if not account or not bcrypt.checkpw(password.encode(), account.password_hash.encode()):
+    return Response({"message": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+token = jwt.encode(
+    {"id": account.id, "email": account.email, "role": account.role,
+     "iat": issued_at, "exp": issued_at + timedelta(hours=24)},
+    settings.JWT_SECRET,
+    algorithm="HS256",
+)
+```
+
+For later requests, [`authentication.py`](./backend/api/authentication.py) validates the Bearer token and retrieves the account from the database. [`settings.py`](./backend/vitalsync_api/settings.py) makes this authentication class and `IsAuthenticated` the default for API views; login and other intentionally public endpoints explicitly override that default. **A valid token identifies the account; endpoint code must still check role and access to the requested patient.**
+
+#### 4. Database models — ORM mapping to PostgreSQL tables
+
+In [`models.py`](./backend/api/models.py), a representative model is:
+
+```python
+class LifestyleLog(models.Model):
+    patient = models.ForeignKey(PatientProfile, models.DO_NOTHING, blank=True, null=True)
+    type = models.CharField(max_length=20)
+    date = models.DateField()
+    detail = models.TextField(blank=True, null=True)
+    payload = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "lifestyle_logs"
+```
+
+**What it does:** This Django model maps Python fields to columns in the existing PostgreSQL `lifestyle_logs` table, so API code can query and save log records using the ORM. `managed = False` means Django's normal model migration mechanism does not create/manage this table. The model is the database access map, not the API endpoint itself; the database stores the actual rows.
+
+#### 5. Patient authorization and log persistence — API rules plus database queries
+
+The access helper in [`patients.py`](./backend/api/patients.py) builds the set of patients a doctor is allowed to see:
+
+```python
+return MonitoringRelationship.objects.filter(
+    Q(managing_doctor_id=doctor_profile_id)
+    | Q(visibility="All Doctors")
+    | Q(visibility="Selected Doctors",
+        selected_doctor_ids__contains=[doctor_profile_id])
+).values_list("patient_id", flat=True)
+```
+
+`MonitoringRelationship.objects.filter(...)` is an ORM query to PostgreSQL; the access rule is enforced by backend API code, not by the browser. In [`logs.py`](./backend/api/logs.py), `lifestyle_logs` checks the account role, derives a patient's identity from the authenticated account for patient writes, and verifies a doctor's access before returning that patient's logs. A successful patient log submission is saved with `LifestyleLog.objects.create(...)`. So this feature is both an **API operation** and a **database read/write**.
+
+#### 6. Stress classification — doctor-only API and model inference
+
+In [`stress_views.py`](./backend/api/stress_views.py), the endpoint first checks the doctor's role and authorized patient, then retrieves that patient's stress log and calls the classifier:
+
+```python
+log = LifestyleLog.objects.filter(
+    id=log_id, patient_id=patient.id, type="stress"
+).first()
+label, result_status = classify_reflection(log.detail or "")
+```
+
+[`stress_nlp.py`](./backend/api/stress_nlp.py) preprocesses the reflection and runs the saved SVM model. The endpoint returns the label as JSON; it does not write the classification result back to PostgreSQL. The original stress reflection itself is a database log. This output is a technical prototype result—not a diagnosis or treatment recommendation.
+
+**Source note:** `stress_views.py` still has a comment calling the endpoint “PROPOSED”; that comment is stale. The route is wired in `urls.py` and the feature is implemented and deployed, as described in the deployment status below.
+
+## 2. Current deployment status
+
+The following describes the hosted demo environment as last verified in October 2026; it is not a production or research-ready approval.
+
+- [x] Both frontends are deployed to Vercel Production.
+- [x] The Django REST Framework API is deployed on Render as `vitalsync-nlp-test-api`.
+- [x] The Render API connects to the main Supabase PostgreSQL database. Supabase hosts the database, not Django.
+- [x] The public API health endpoint returned `status: ok` and a database timestamp on October 22, 2026.
+- [x] Django sends hosted patient-invitation and password-change verification emails through Brevo's HTTPS API.
+- [x] Full backend suite: the latest recorded run reports 72 tests passing, along with `manage.py check`. This is historical test evidence, not a claim that the suite was rerun after every deployment change.
+- [x] NLP E2E-01–19 passed on an isolated fictional-data setup on October 14–15, 2026. After switching to the hosted Vercel Production → Render → main Supabase environment, E2E-01, E2E-12, and E2E-13 passed as post-merge smoke checks on October 19. The full 19-case suite was not rerun on the hosted environment.
+- [x] On October 21–22, all nine synthetic patient demo-account logins and selected doctor/patient views, logs, goals, messages, monitoring history, registry search, and one stress-classification result were manually exercised. These are targeted demo checks, not comprehensive end-to-end certification.
+- [x] The main Supabase database contains synthetic demo accounts and seeded demo records. The nine patient demo accounts were created directly for demonstration and use non-deliverable `.invalid` email identifiers; this is not the normal invitation workflow and is not participant data. Keep demo credentials in the separate local-only credential note, never in these repository documents.
+- [ ] The checked device-local frontend `.env.local` files still point to the previous Render hostname; update them to the current API URL before local frontend development against the hosted API. These files are ignored by Git and are not authoritative for the Vercel deployment.
+- [ ] Confirm any credentials exposed in earlier screenshots/messages have been rotated or revoked; update hosted/local configuration with replacements.
+- [ ] Before any research use, meet ethics, privacy, security, and research-ready requirements and replace demo-only data as appropriate. Until then, use only synthetic/demo data.
+
+The currently used hosted API base URL is:
+
+```text
+https://vitalsync-nlp-test-api.onrender.com/api
+```
+
+The production frontend URLs are:
+
+- Doctor Dashboard: `https://vital-sync-prototype-doctor-dashboard.vercel.app/`
+- Patient Portal: `https://vital-sync-prototype-patient-portal.vercel.app/`
+
+Render's Free web service can sleep after inactivity; the first request after sleep may be delayed or time out. Use this deployment for demos/testing, not as a production healthcare service.
 
 ## 3. Inviting teammates to service accounts
 
@@ -83,7 +195,7 @@ When a teammate leaves or no longer needs access, remove their provider-account 
 
 ### Set up the local frontends to use the deployed API
 
-Clone the repository and check out the shared working branch (currently `test-branch`). In **each** frontend folder, create a file named `.env.local`:
+Clone the repository and check out the shared branch (`main`). In **each** frontend folder, create or update a file named `.env.local`:
 
 `doctor-dashboard/.env.local`
 
@@ -92,7 +204,7 @@ Clone the repository and check out the shared working branch (currently `test-br
 Put this in both files:
 
 ```dotenv
-VITE_API_BASE_URL=https://vitalsync-django-api.onrender.com/api
+VITE_API_BASE_URL=https://vitalsync-nlp-test-api.onrender.com/api
 ```
 
 Save the files. They are intentionally gitignored and must be created separately on each developer device. Do not put a database URL, Django secret, JWT secret, or Brevo key in a frontend environment file.
@@ -113,7 +225,7 @@ npm ci
 
 ## 5. Daily use: local frontends + hosted backend
 
-The usual current workflow does **not** need local PostgreSQL or a local Django server. Render runs Django and Django connects to Supabase online.
+The usual hosted-demo workflow does **not** need local PostgreSQL or a local Django server: Render runs Django and connects to Supabase online. The original local development setup used Django with PostgreSQL; local Django can still connect to a local PostgreSQL database by setting `DATABASE_URL` in the private `backend/.env`. A local database and the hosted Supabase database are separate environments and do not share data automatically.
 
 Open two terminals from the repository root:
 
@@ -131,15 +243,15 @@ Open:
 
 - Doctor Dashboard: `http://localhost:5173`
 - Patient Portal: `http://localhost:5174`
-- API health check: `https://vitalsync-django-api.onrender.com/api/health`
+- API health check: `https://vitalsync-nlp-test-api.onrender.com/api/health`
 
 Vite reads `.env.local` only at startup. If you edit it while a dev server is running, stop that server with `Ctrl+C` and run `npm run dev` again.
 
-The current Render CORS setting permits the local frontend origins above. Browser requests go from the local frontend to the remote Render API, then Django reads/writes Supabase. Email is sent by Django through Brevo. Reload the page to verify persisted changes.
+The Render CORS configuration must allow the exact production Vercel origins and any local frontend origins used by the team. Browser requests go from the frontend to the remote Render API, then Django reads/writes Supabase. Email is sent by Django through Brevo. Reload the page to verify persisted changes.
 
 ## 6. Optional: run Django locally
 
-Only do this when you are developing or debugging the backend itself. The local frontends normally use Render as described above.
+Only do this when you are developing or debugging the backend itself. The local frontends normally use Render as described above. Choose a local PostgreSQL URL for isolated local data, or use the hosted database only when you have a specific need and authorization; never put either database URL in frontend configuration.
 
 From `backend/`, create a Python virtual environment, install backend requirements, and make a private `.env` from the tracked example:
 
@@ -163,7 +275,7 @@ The API health URL is `http://localhost:8000/api/health`. Django's development s
 
 ### Database migration safety
 
-The shared Supabase database is already migrated. Do **not** run `migrate` as part of daily startup, on every developer device, or in Render's build command.
+The shared Supabase database has its application schema applied. Do **not** run `migrate` as part of daily startup, on every developer device, or in Render's build command. For a newly created local PostgreSQL database, review the migration plan and apply the required migrations once to that local database.
 
 When a backend change adds or alters a model/field:
 
@@ -180,7 +292,7 @@ The existing Render Web Service uses:
 
 | Setting | Value |
 |---|---|
-| Repository branch | `test-branch` |
+| Repository branch | `main` |
 | Root Directory | `backend` |
 | Runtime | Python 3 |
 | Build Command | `pip install -r requirements.txt && python manage.py collectstatic --no-input` |
@@ -193,14 +305,14 @@ Render environment variables are entered in the Render dashboard, not committed 
 | `DJANGO_DEBUG=false` | Production debug setting |
 | `DJANGO_SECRET_KEY` | Private Django signing secret |
 | `JWT_SECRET` | Separate private token-signing secret |
-| `DATABASE_URL` | Private Supabase Session pooler PostgreSQL URL (port 5432, SSL required) |
+| `DATABASE_URL` | Private PostgreSQL connection URL; hosted Render uses the configured Supabase endpoint with SSL |
 | `DJANGO_ALLOWED_HOSTS` | Render API hostname, without `https://` |
 | `DJANGO_SECURE_SSL_REDIRECT=true` | Require HTTPS |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated exact frontend origins; currently local origins, later the Vercel origins |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated exact production Vercel origins and any approved local frontend origins |
 | `EMAIL_BACKEND=api.email_backend.BrevoEmailBackend` | Send hosted email through Brevo HTTPS API |
 | `BREVO_API_KEY` | Private Brevo API key |
 | `EMAIL_FROM_ADDRESS` | Verified sender email configured in Brevo |
-| `PATIENT_PORTAL_URL` | Patient portal URL used in invitation email; currently local, later the Vercel URL |
+| `PATIENT_PORTAL_URL` | Patient Portal production URL used in invitation email |
 | `CSRF_TRUSTED_ORIGINS` | Set exact HTTPS origins only if a CSRF-protected browser flow requires them |
 
 Never expose or paste secret values into chat, screenshots, source code, frontend variables, or Git. Rotate any credential that has been exposed.
@@ -229,19 +341,25 @@ Install frontend dependencies with `npm ci` in each frontend directory. Install 
 
 ## 10. Feature scope and safe use
 
-Implemented connected workflows include authentication, profiles, patient registry, visibility/authorization, logs, provider and personal goals, messages, notes, preferences, custom activity choices, reminders, monitoring history, and archive/reactivation.
+Implemented connected workflows include authentication, profiles, patient registry, visibility/authorization, logs, provider and personal goals, messages, notes, preferences, custom activity choices, reminders, monitoring history, and archive/reactivation. The stress-classification endpoint is also implemented and integrated into the doctor-facing journey view.
+
+There is one known cross-device integration gap: provider-goal definitions are stored through the API, but the Doctor Dashboard `PatientGoalsView` calculates progress from the browser's legacy `vitalsync_logs_v1` localStorage entry instead of fetching the authorized patient's API logs. As a result, progress on that screen can be stale or differ by browser. This does not make the backend log data local-only; it is a frontend calculation-source inconsistency that remains to be fixed.
+
+Personal-goal progress is stored as a value and is not calculated from logged activity by the backend. Notification settings and reminders are stored preferences, not delivered notifications.
 
 Not implemented: general password recovery, notification delivery, profile-photo storage, offline sync, real-time updates, push notifications, doctor mobile app, or clinical diagnosis/decision support. The rule-based "Your Journey" text is not AI, NLP, or clinical prediction.
 
 All study-facing records must remain synthetic/demo data until ethics approval and all research-ready requirements are met.
 
-### Stress NLP/SVM module (PROPOSED contract, pending team agreement)
+### Stress NLP/SVM module (implemented prototype feature)
 
-- Four-class stress-only model (`NO_STRESS`, `MILD_STRESS`, `MODERATE_STRESS`, `HIGH_STRESS`), trained on the supplied v1.0 dataset per the task owner's direction. The dataset is English, Filipino and mixed; support is claimed for English only (decided October 12, 2026). Model and metadata: `backend/api/nlp_model/stress_svm.joblib` / `.json`; rebuild with `python -m api.nlp_model.export_model <dataset.csv> <C>` from `backend/`.
-- Endpoint: `POST /api/patients/<id>/stress-classification` with `{"log_id": n}`. Doctor-only and limited to authorized patients; patients get 403. Response has `label`, `status`, `model_version` and no confidence. Nothing is stored and reflection text is never logged.
-- Not storing the classification result was confirmed as the intended design on October 12, 2026 (backend member to confirm). The Doctor Dashboard calls the endpoint for the patient's latest stress reflection and shows the result in Your Journey (branch `feature/stress-svm-integration`); the Patient Portal does not call it. Merged to `main` in PR #2 at `b6321bc` on October 18, 2026. E2E-01–19 passed on the isolated test setup with fictional data on October 14–15. After the deployment environment changed to Vercel Production → Render `vitalsync-nlp-test-api` → main Supabase, post-merge E2E-01, E2E-12, and E2E-13 smoke checks passed on October 19; the full 19-case suite was not rerun on that environment.
-- `manage.py check` passed and all 72 backend tests passed. The 12 new API-view tests use mocked data; they cover valid, blank, short, model-unavailable, and authorization cases, but are not live-database or deployed end-to-end tests.
-- Results are technical performance on simulated data (test accuracy 0.676, macro-F1 0.577), not clinical validity. Details: `docs/DEPLOYED-FRONTEND-WORKFLOW-VERIFICATION-2026-10-11.md`.
+- Four-class stress-only model (`NO_STRESS`, `MILD_STRESS`, `MODERATE_STRESS`, `HIGH_STRESS`), trained on the supplied v1.0 simulated dataset. The dataset contains English, Filipino, and mixed texts; claimed language support is English only. Model and metadata: `backend/api/nlp_model/stress_svm.joblib` / `.json`; rebuild with `python -m api.nlp_model.export_model <dataset.csv> <C>` from `backend/`.
+- Endpoint: `POST /api/patients/<id>/stress-classification` with `{"log_id": n}`. It is doctor-only and limited to authorized patients. The response includes `label`, `status`, and `model_version`, without a confidence value. The result is returned on request and is not stored; reflection text is not logged by the classifier endpoint.
+- The Doctor Dashboard requests classification for the patient's latest stress reflection and displays the result in Your Journey. The Patient Portal does not show the classification. This is not a diagnosis, risk score, treatment recommendation, or automated clinical decision.
+- Merged to `main` in PR #2 at `b6321bc` on October 18, 2026. E2E-01–19 passed on an isolated fictional-data setup on October 14–15. After the deployment environment changed to Vercel Production → Render `vitalsync-nlp-test-api` → main Supabase, post-merge E2E-01, E2E-12, and E2E-13 smoke checks passed on October 19; the full 19-case suite was not rerun on that hosted environment.
+- `manage.py check` and all 72 backend tests passed in the latest recorded automated run. The 12 API-view tests use mocked data and cover valid, blank, short, model-unavailable, and authorization cases; they are not live-database or deployed end-to-end tests.
+- During the October 21–22 synthetic demo checks, one submitted stress reflection displayed “No Stress.” This verifies only that specific path/result; it does not verify all four labels or clinical validity.
+- Results are technical performance on simulated data (test accuracy 0.676, macro-F1 0.577), not clinical validity. See `NLP/NLP.md` for the master document and `docs/DEPLOYED-FRONTEND-WORKFLOW-VERIFICATION-2026-10-11.md` for dated workflow evidence.
 - Requires `scikit-learn`, `numpy`, `scipy`, `joblib` (added to `requirements.txt`); `scikit-learn` is constrained to `>=1.9,<1.10` for model compatibility.
 
 For feature requirements and decisions, consult [BACKEND.md](./BACKEND.md), [WORKFLOW.md](./WORKFLOW.md), [ARCHITECTURE.md](./ARCHITECTURE.md), and [CLAUDE.md](./CLAUDE.md).

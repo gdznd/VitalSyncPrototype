@@ -2,11 +2,11 @@
 
 ## Purpose and prototype boundary
 
-Build the smallest persistent backend that makes the existing Doctor Dashboard and Patient Portal behave as one **interview-ready qualitative-research prototype**. The V1 Django/PostgreSQL integration now connects the main login, registry, logging, goals, and messaging flows; see `BACKEND_Implementation.md` for the verified implementation snapshot and remaining work. This guide remains the feature and authorization contract for continuing that integration.
+This guide describes the backend feature contract and the current Django/PostgreSQL integration for the VitalSync prototype. The current hosted request path is **Vercel frontends → Django REST Framework API on Render → PostgreSQL on Supabase**. Local development can run Django and use either a configured local PostgreSQL database or the hosted database; see `BACKEND_Implementation.md` for setup and the dated verification record.
 
-This is not a production-healthcare platform brief. Do not add features, workflow variants, analytics, or infrastructure that the current code and contract do not require. The prototype needs correct identity, role isolation, persistence, access checks, and cross-application consistency for the interview flows.
+The prototype supports synthetic/demo workflows. It is **not an interview-ready research system, production healthcare platform, or authorization to collect participant data**. Ethics approval, research-ready security and privacy review, and confirmation of the remaining research decisions are separate requirements.
 
-The frontend refactor and backend work may proceed in parallel. The frontend should replace direct localStorage/mock reads with a service/API layer; it must not have to redesign screens or workflows to use the backend.
+Do not add features, workflow variants, analytics, or infrastructure that the current code and contract do not require. Preserve correct identity, role isolation, persistence, server-side access checks, and cross-application consistency.
 
 ## Authority and how to resolve conflicts
 
@@ -21,36 +21,30 @@ Use this order when a requirement conflicts:
 
 Do not treat mock values, generated fallback records, or decorative UI controls as backend requirements. When the source materials do not settle a behavior, label it **Decision needed** and ask the team before implementing it.
 
-## Current implementation: what is real and what is only a prototype
+## Current implementation: what is connected and what remains prototype-only
 
-### Separate applications, separate local state
+Both frontends are separate React/Vite applications. The connected production path uses a Django REST Framework API and PostgreSQL: JWT authentication identifies the account, Django enforces roles and patient visibility, and both applications read/write shared server records. The current deployment and verification limits are recorded in `BACKEND_Implementation.md`.
 
-Both are React/Vite applications. The V1 integration connects core workflows to the Django API; the bullets below describe the original pre-integration prototype state and remaining mock surfaces, not the complete current implementation.
+### Connected server-backed workflows
 
-- The Patient Portal stores logs, personal goals, provider goals, and the selected demo patient in browser `localStorage`.
-- The Doctor Dashboard stores provider goals and doctor accounts in browser `localStorage`; its patient registry, follow-ups, visibility, messages, and profiles are mostly in component state or hard-coded data.
-- Therefore, sharing a browser/origin can make selected data appear shared, but there is no actual cross-application persistence, authentication, or authorization.
+- Doctor registration/login and patient login use the backend `public.users` table and bcrypt password hashes. The app does not use Supabase Auth for these accounts.
+- Patient profiles, doctor profiles, monitoring relationships/visibility, follow-up dates, monitoring history, logs, provider goals, personal goals, patient-provider messages, doctor Team messages, notes, settings/preferences, reminders, and patient activity choices have backend-backed API flows.
+- The doctor-only stress-classification endpoint is implemented; it returns an on-request result for an authorized patient's stress reflection without storing the result. See `BACKEND_Implementation.md` and `NLP/NLP.md` for the limited test evidence and intended use.
+- The browser stores JWTs for authenticated API requests. This is session-token storage, not the old browser-local source of truth for account or health records.
+- Both frontends are deployed on Vercel; the hosted Django service runs on Render and connects to PostgreSQL on Supabase. Brevo is used by Django for transactional email.
 
-The important local keys are:
+### Known legacy/local-only behavior and limitations
 
-| Key | Current content | Limitation to replace |
-| --- | --- | --- |
-| `vitalsync_logs_v1` | All patient lifestyle logs, each stamped with `patientUniqueId` | Patient-local only; loose `any[]` data |
-| `vitalsync_goals_v1` | Personal wellness goals | Patient-local only |
-| `vitalsync_provider_goals_v1` | Provider-assigned goals | Shared browser key, not an authorized clinical source |
-| `vitalsync_current_patient_id` | Current demo patient ID; defaults to `VS-0002` | A manual demo selector, not patient authentication |
-| `vitalsync_doctor_accounts_v1` | Mock doctor accounts, including plaintext passwords | Not secure/authenticated; registration is local |
-| `vitalsync_doctor_summary_logs_<name>` | Generated/legacy doctor-summary fallback logs | Must not be treated as submitted patient data |
-| `vitalsync_last_reminder` (session storage) | Last randomly selected wellness reminder | Presentation-only; no backend responsibility |
+- The Doctor Dashboard `PatientGoalsView` still reads `vitalsync_logs_v1` from browser `localStorage` to calculate provider-goal progress. Goal definitions are persisted via the API, but this screen's progress can disagree with the server-backed patient logs or another browser. Replace that read with authorized API logs before treating goal progress as consistently cross-device.
+- Personal-goal progress is a patient-owned stored value; it is not calculated from health logs by the backend.
+- Notification preferences and reminder settings are persisted preferences only. There is no push, scheduled, or real-time notification delivery.
+- The browser's local reminder choice is presentation-only. Do not treat legacy localStorage values or generated fallback data as patient-submitted records.
+- Patient profiles do not include a sex field. Patient phone/address fields are optional and may be blank. Profile-photo selection is preview-only and is not stored.
+- Demo patient accounts created directly by SQL may use non-deliverable `.invalid` login identifiers and demo-only credentials. Such accounts cannot receive invitation/password emails and are not the supported account-provisioning path.
 
-### Original prototype identity and isolation limitations
+### Identity and authorization boundary
 
-The V1 integration addresses these limitations for connected workflows. Use the implementation guide to distinguish completed flows from remaining mock surfaces.
-
-- Patient Portal login is only `useState(false)` in `App.tsx`; it does not identify a patient. The active patient is selected through `vitalsync_current_patient_id`, defaulting to `VS-0002` (John Dela Cruz).
-- Doctor login matches email and plaintext password against locally stored mock accounts. It sets `currentDoctor` for display but the registry and most records remain the same regardless of the signed-in doctor.
-- The dashboard's patient visibility values are editable in UI but are not used to restrict which patient records a doctor can list/open.
-- The patient provider roster and messages are static. Replies are simulated, not persisted.
+The backend derives the authenticated account and role from the JWT and applies authorization on each request. Do not trust browser-supplied roles, ownership, managing-doctor IDs, `assignedBy` names, or visibility claims. The backend is authoritative for connected identity, access control, and persisted records; the localStorage-based provider-goal progress reader is the explicit exception noted above.
 
 **Security and Backend Boundary Rule:**
 - Backend must derive authenticated user and role server-side.
@@ -296,9 +290,9 @@ Where useful, provide a patient-workspace/doctor-patient-detail read model so a 
 
 ## Frontend integration contract
 
-The backend teammate should agree API DTOs and error behavior with both frontend members before broad integration. Preserve UI vocabulary where practical: `patientUniqueId`, `Assigned Only`, goal statuses, frequencies, and the existing log types. Stable IDs may change from numeric local IDs to backend IDs, so frontend code must stop assuming `Date.now()` identifiers are globally meaningful.
+Preserve UI vocabulary where practical: `patientUniqueId`, `Assigned Only`, goal statuses, frequencies, and the existing log types. Stable IDs may change from numeric local IDs to backend IDs, so frontend code must stop assuming `Date.now()` identifiers are globally meaningful.
 
-Suggested integration order:
+The original integration order is retained as implementation history:
 
 1. Authenticated session/context and role bootstrap.
 2. Doctor registry plus server-enforced visibility and monitoring lifecycle.
@@ -308,14 +302,14 @@ Suggested integration order:
 6. Messaging and persisted follow-up updates.
 7. Remove/disable mock fallback paths only after the connected endpoint is verified.
 
-During the transition, local data is a migration aid only. Do not merge browser-local and server records indefinitely, and do not call localStorage authoritative after a backend record exists. Seeded demonstration accounts/data are acceptable for interviews if clearly managed as seed data, not client-side mock state.
+Connected flows should use the API rather than browser-local copies. The known exception is the Doctor Dashboard provider-goal progress calculation described above; it still reads `vitalsync_logs_v1` and must be replaced with an authorized API log source. Seeded demonstration accounts/data are acceptable for demos only when clearly synthetic and managed as seed data, not client-side mock state.
 
 ## Explicitly out of scope
 
 - Realtime sockets, typing synchronization, live unread delivery, push notifications, and notification email/SMS delivery. Email delivery for patient invitations and password-change verification codes remains in scope.
 - Group chat.
 - Offline sync/conflict resolution.
-- ML/SVM, risk scoring, advanced analytics, or clinical decision support.
+- Risk scoring, advanced analytics, or clinical decision support. The implemented four-class stress classifier is a separate, doctor-only technical prototype; it is not a diagnosis, risk score, treatment recommendation, or clinical decision-support feature.
 - A clinical-success/failure conclusion from goal attainment.
 - Production-grade compliance certification, audit/compliance systems, enterprise tenancy, high-availability, or scale architecture.
 - Persistent food-photo and profile-picture storage for this MVP.
@@ -328,7 +322,7 @@ Basic secure password handling, authenticated sessions, authorization checks, in
 
 ## Definition of done for this backend prototype
 
-The backend is ready for the interview prototype when all of the following are demonstrable:
+These are acceptance criteria for the connected synthetic-data prototype, not evidence of research readiness or clinical suitability. Current deployment and dated verification evidence are in `BACKEND_Implementation.md`. The criteria below describe the intended behavior; the known localStorage provider-goal progress exception remains unresolved:
 
 - Signing in as different doctors returns different, server-authorized data; it no longer shows Jamie's data after Rafael signs in merely because UI state changed.
 - Signing in as a patient establishes that patient's identity without a browser-selected demo ID.
@@ -348,7 +342,7 @@ The backend is ready for the interview prototype when all of the following are d
 - Archive retains the patient account/history, preserves provider goals and existing lifecycle status without automatic modification, and reactivation uses the existing unique ID and restores monitoring without duplication.
 - Inactive-monitoring behavior preserves provider-goal rows and statuses, hides patient-facing provider-goal work, prevents goal changes until reactivation, limits messaging to the established doctor, and follows the documented access rules.
 - Follow-up date persists and priority behavior remains consistent with the dashboard.
-- Both applications use the agreed service/API contracts without direct localStorage as their authoritative data source.
+- Both applications use the agreed service/API contracts for connected records; provider-goal progress must also use authorized API logs rather than direct localStorage.
 - The team has manually exercised the core interview paths with at least two doctors and more than one patient, including a denied-access check.
 
 ## Confirmed implementation decisions
