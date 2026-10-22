@@ -2,6 +2,7 @@
 -- Reverse-engineered from the live `vitalsync_db` database on 2026-10-02 via
 -- information_schema/pg_catalog introspection, since the tables were created by hand
 -- and are mapped in Django with `managed = False` (see backend/api/models.py).
+-- Includes the doctor-registration email verification schema added in migration 0009.
 -- Run this against a fresh Postgres database to reproduce the schema the API expects.
 
 CREATE TABLE users (
@@ -10,7 +11,17 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL,
     is_temporary_password BOOLEAN DEFAULT false,
+    email_verified BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE doctor_registration_verifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    code_hash VARCHAR(255) NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    attempts SMALLINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE password_change_verifications (

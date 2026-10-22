@@ -381,7 +381,7 @@ def doctor_directory(request):
     if request.user.role != "doctor":
         return Response({"message": "Doctor account required."}, status=status.HTTP_403_FORBIDDEN)
 
-    doctors = DoctorProfile.objects.order_by("name")
+    doctors = DoctorProfile.objects.filter(user__email_verified=True).order_by("name")
     return Response({
         "doctors": [
             {

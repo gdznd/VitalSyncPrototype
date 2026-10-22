@@ -33,6 +33,7 @@ from api.logs import lifestyle_logs
 from api.patients import (
     archive_patient,
     authorized_patient_ids,
+    doctor_directory,
     patient_list,
     reactivate_patient,
 )
@@ -42,7 +43,9 @@ from api.views import (
     login,
     register_doctor,
     request_password_change_code,
+    resend_doctor_registration_code,
     verify_password_change_code,
+    verify_doctor_registration,
 )
 
 
@@ -827,7 +830,7 @@ class TemporaryPasswordEnforcementTests(SimpleTestCase):
     def authenticate_path(self, path):
         request = self.factory.get(path, HTTP_AUTHORIZATION="Bearer test-token")
         with (
-            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": "patient"}),
+            patch("api.authentication.jwt.decode", return_value={"id": 12, "role": self.account.role}),
             patch("api.authentication.UserAccount.objects.get", return_value=self.account),
         ):
             return VitalSyncJWTAuthentication().authenticate(request)
@@ -858,6 +861,23 @@ class TemporaryPasswordEnforcementTests(SimpleTestCase):
     def test_regular_patient_can_reach_protected_resources(self):
         self.account.is_temporary_password = False
         account, _ = self.authenticate_path("/api/patient/profile")
+        self.assertIs(account, self.account)
+
+    def test_temporary_doctor_can_only_reach_password_setup_routes(self):
+        self.account.role = "doctor"
+        for path in ("/api/auth/me", "/api/auth/change-password"):
+            with self.subTest(path=path):
+                account, _ = self.authenticate_path(path)
+                self.assertIs(account, self.account)
+
+        for path in ("/api/doctor/profile", "/api/auth/change-password/code"):
+            with self.subTest(path=path), self.assertRaises(PermissionDenied):
+                self.authenticate_path(path)
+
+    def test_regular_doctor_can_reach_protected_resources(self):
+        self.account.role = "doctor"
+        self.account.is_temporary_password = False
+        account, _ = self.authenticate_path("/api/doctor/profile")
         self.assertIs(account, self.account)
 
 
@@ -1003,6 +1023,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             email="doctor@example.test",
             role="doctor",
             is_temporary_password=False,
+            email_verified=False,
             created_at=None,
         )
         profile = SimpleNamespace(
@@ -1017,11 +1038,16 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             patch("api.views.bcrypt.hashpw", return_value=b"hashed"),
             patch("api.views.bcrypt.gensalt", return_value=b"salt"),
             patch("api.views.UserAccount.objects.create", return_value=account) as create_account,
+            patch("api.views.email_is_configured", return_value=True),
             patch("api.views.DoctorProfile.objects.create") as create_profile,
             patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
+            patch("api.views.DoctorRegistrationVerification.objects.create") as create_verification,
             patch("api.views.transaction.atomic", return_value=nullcontext()),
-            patch("jwt.encode", return_value="signed-token"),
+            patch("api.views.make_password", return_value="hashed-code"),
+            patch("api.views.secrets.randbelow", return_value=1234),
+            patch("api.views.EmailMessage") as email_message,
         ):
+            email_message.return_value.send.return_value = 1
             response = register_doctor(
                 self.authenticated_request(
                     "/api/auth/register-doctor",
@@ -1035,14 +1061,40 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["user"]["role"], "doctor")
+        self.assertIn("verification code was sent", response.data["message"])
         create_account.assert_called_once_with(
             email="doctor@example.test",
             password_hash="hashed",
             role="doctor",
             is_temporary_password=False,
+            email_verified=False,
         )
         create_profile.assert_called_once()
+        create_verification.assert_called_once()
+        self.assertEqual(create_verification.call_args.kwargs["code_hash"], "hashed-code")
+        self.assertEqual(create_verification.call_args.kwargs["attempts"], 0)
+        self.assertIn("001234", email_message.call_args.kwargs["body"])
+
+    def test_doctor_registration_fails_closed_without_email_configuration(self):
+        registration_data = {
+            "name": "Test Doctor",
+            "email": "doctor@example.test",
+            "password": "TestPassword123!",
+            "specialty": "General",
+        }
+        with (
+            patch("api.views.email_is_configured", return_value=False),
+            patch("api.views.UserAccount.objects.create") as create_account,
+        ):
+            response = register_doctor(
+                self.authenticated_request(
+                    "/api/auth/register-doctor",
+                    data=registration_data,
+                )
+            )
+
+        self.assertEqual(response.status_code, 503)
+        create_account.assert_not_called()
 
     def test_doctor_login_returns_a_signed_token_and_role(self):
         account = SimpleNamespace(
@@ -1051,6 +1103,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             password_hash="stored-hash",
             role="doctor",
             is_temporary_password=False,
+            email_verified=True,
             created_at=None,
         )
         profile_query = Mock()
@@ -1069,7 +1122,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
             patch("api.views.UserAccount.objects.filter") as filter_accounts,
             patch("api.views.bcrypt.checkpw", return_value=True) as check_password,
             patch("api.views.DoctorProfile.objects.filter", return_value=profile_query),
-            patch("jwt.encode", return_value="signed-token"),
+            patch("jwt.encode", return_value="signed-token") as encode_token,
         ):
             filter_accounts.return_value.first.return_value = account
             response = login(request)
@@ -1077,7 +1130,170 @@ class ContractAcceptanceApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["token"], "signed-token")
         self.assertEqual(response.data["user"]["role"], "doctor")
+        self.assertFalse(response.data["user"]["is_temporary_password"])
+        payload = encode_token.call_args.args[0]
+        self.assertEqual((payload["exp"] - payload["iat"]).total_seconds(), 4 * 60 * 60)
         check_password.assert_called_once_with(b"strong-pass", b"stored-hash")
+
+    def test_unverified_doctor_cannot_log_in(self):
+        account = SimpleNamespace(
+            id=17,
+            email="doctor@example.test",
+            password_hash="stored-hash",
+            role="doctor",
+            is_temporary_password=False,
+            email_verified=False,
+            created_at=None,
+        )
+        request = self.factory.post(
+            "/api/auth/login",
+            data={"email": "doctor@example.test", "password": "strong-pass"},
+            format="json",
+        )
+        with (
+            patch("api.views.UserAccount.objects.filter") as filter_accounts,
+            patch("api.views.bcrypt.checkpw", return_value=True),
+            patch("jwt.encode") as encode_token,
+        ):
+            filter_accounts.return_value.first.return_value = account
+            response = login(request)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Verify your email", response.data["message"])
+        encode_token.assert_not_called()
+
+    def test_doctor_registration_verification_activates_account(self):
+        account = SimpleNamespace(id=17, email_verified=False)
+        verification = Mock(
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            attempts=0,
+            code_hash="hashed-code",
+        )
+        account_query = Mock()
+        account_query.first.return_value = account
+        verification_query = Mock()
+        verification_query.first.return_value = verification
+        request = self.factory.post(
+            "/api/auth/register-doctor/verify",
+            data={"email": " DOCTOR@example.test ", "code": "001234"},
+            format="json",
+        )
+        with (
+            patch("api.views.UserAccount.objects.select_for_update") as lock_accounts,
+            patch("api.views.DoctorRegistrationVerification.objects.select_for_update") as lock_verifications,
+            patch("api.views.UserAccount.objects.filter") as filter_accounts,
+            patch("api.views.check_password", return_value=True),
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            lock_accounts.return_value.filter.return_value = account_query
+            lock_verifications.return_value.filter.return_value = verification_query
+            response = verify_doctor_registration(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Email verified", response.data["message"])
+        filter_accounts.assert_called_once_with(id=17, role="doctor")
+        filter_accounts.return_value.update.assert_called_once_with(email_verified=True)
+        verification.delete.assert_called_once()
+
+    def test_doctor_registration_verification_rejects_incorrect_code(self):
+        account = SimpleNamespace(id=17, email_verified=False)
+        verification = Mock(
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            attempts=0,
+            code_hash="hashed-code",
+        )
+        account_query = Mock()
+        account_query.first.return_value = account
+        verification_query = Mock()
+        verification_query.first.return_value = verification
+        request = self.factory.post(
+            "/api/auth/register-doctor/verify",
+            data={"email": "doctor@example.test", "code": "000000"},
+            format="json",
+        )
+        with (
+            patch("api.views.UserAccount.objects.select_for_update") as lock_accounts,
+            patch("api.views.DoctorRegistrationVerification.objects.select_for_update") as lock_verifications,
+            patch("api.views.check_password", return_value=False),
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            lock_accounts.return_value.filter.return_value.first.return_value = account
+            lock_verifications.return_value.filter.return_value.first.return_value = verification
+            response = verify_doctor_registration(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(verification.attempts, 1)
+        verification.save.assert_called_once_with(update_fields=["attempts"])
+
+    def test_doctor_directory_excludes_unverified_accounts(self):
+        doctor = SimpleNamespace(
+            id=17,
+            user_id=9,
+            name="Doctor Example",
+            initials="DE",
+            display_color="#d9ecf1",
+            specialty="General Medicine",
+        )
+        doctor_query = Mock()
+        doctor_query.order_by.return_value = [doctor]
+        with patch("api.patients.DoctorProfile.objects.filter", return_value=doctor_query) as filter_doctors:
+            response = doctor_directory(self.authenticated_request("/api/doctors", method="get"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["doctors"]), 1)
+        filter_doctors.assert_called_once_with(user__email_verified=True)
+
+    def test_resend_doctor_registration_code_is_generic_for_unknown_email(self):
+        request = self.factory.post(
+            "/api/auth/register-doctor/resend",
+            data={"email": "unknown@example.test"},
+            format="json",
+        )
+        with (
+            patch("api.views.email_is_configured", return_value=True),
+            patch("api.views.UserAccount.objects.select_for_update") as lock_accounts,
+            patch("api.views.EmailMessage") as email_message,
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            lock_accounts.return_value.filter.return_value.first.return_value = None
+            response = resend_doctor_registration_code(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("If an unverified doctor account exists", response.data["message"])
+        email_message.assert_not_called()
+
+    def test_resend_doctor_registration_code_sends_for_unverified_account(self):
+        account = SimpleNamespace(id=17)
+        account_query = Mock()
+        account_query.first.return_value = account
+        verification_query = Mock()
+        verification_query.first.return_value = None
+        request = self.factory.post(
+            "/api/auth/register-doctor/resend",
+            data={"email": "doctor@example.test"},
+            format="json",
+        )
+        with (
+            patch("api.views.email_is_configured", return_value=True),
+            patch("api.views.UserAccount.objects.select_for_update") as lock_accounts,
+            patch(
+                "api.views.DoctorRegistrationVerification.objects.select_for_update"
+            ) as lock_verifications,
+            patch("api.views.DoctorRegistrationVerification.objects.update_or_create") as save_code,
+            patch("api.views.make_password", return_value="hashed-code"),
+            patch("api.views.secrets.randbelow", return_value=1234),
+            patch("api.views.EmailMessage") as email_message,
+            patch("api.views.transaction.atomic", return_value=nullcontext()),
+        ):
+            lock_accounts.return_value.filter.return_value = account_query
+            lock_verifications.return_value.filter.return_value = verification_query
+            email_message.return_value.send.return_value = 1
+            response = resend_doctor_registration_code(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("If an unverified doctor account exists", response.data["message"])
+        save_code.assert_called_once()
+        self.assertIn("001234", email_message.call_args.kwargs["body"])
 
     def test_doctor_patient_provisioning_sets_temporary_password_and_managing_doctor(self):
         doctor = SimpleNamespace(id=17, user_id=9, name="Dr. Example")
@@ -1165,6 +1381,7 @@ class ContractAcceptanceApiTests(SimpleTestCase):
 
         self.assertIs(result, doctor_query)
         self.assertEqual(filter_doctors.call_args.kwargs["id__in"], {17, 18})
+        self.assertTrue(filter_doctors.call_args.kwargs["user__email_verified"])
 
     def test_archiving_and_reactivating_monitoring_preserves_the_patient_account(self):
         doctor = SimpleNamespace(id=17)

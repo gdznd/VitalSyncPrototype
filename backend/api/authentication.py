@@ -32,14 +32,17 @@ class VitalSyncJWTAuthentication(BaseAuthentication):
         except (jwt.InvalidTokenError, KeyError, UserAccount.DoesNotExist) as exc:
             raise AuthenticationFailed("Invalid or expired token") from exc
 
-        if (
-            account.role == "patient"
-            and account.is_temporary_password
-            and request.path_info not in self.PASSWORD_SETUP_PATHS
-        ):
-            raise PermissionDenied(
-                "Change the temporary password before using patient resources."
+        if account.role in ("patient", "doctor") and account.is_temporary_password:
+            allowed_paths = (
+                self.PASSWORD_SETUP_PATHS
+                if account.role == "patient"
+                else {"/api/auth/me", "/api/auth/change-password"}
             )
+            if request.path_info not in allowed_paths:
+                role_label = "patient" if account.role == "patient" else "doctor"
+                raise PermissionDenied(
+                    f"Change the temporary password before using {role_label} resources."
+                )
 
         return account, claims
 
