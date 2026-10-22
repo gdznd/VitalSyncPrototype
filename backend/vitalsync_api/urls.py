@@ -18,9 +18,7 @@ from api.views import (
     login,
     register_doctor,
     request_password_change_code,
-    resend_doctor_registration_code,
     verify_password_change_code,
-    verify_doctor_registration,
 )
 
 urlpatterns = [
@@ -28,8 +26,6 @@ urlpatterns = [
     path("api/health", health_check, name="health-check"),
     path("api/auth/login", login, name="login"),
     path("api/auth/register-doctor", register_doctor, name="register-doctor"),
-    path("api/auth/register-doctor/verify", verify_doctor_registration, name="verify-doctor-registration"),
-    path("api/auth/register-doctor/resend", resend_doctor_registration_code, name="resend-doctor-registration-code"),
     path("api/auth/me", current_user, name="current-user"),
     path("api/auth/change-password", change_password, name="change-password"),
     path("api/auth/change-password/code", request_password_change_code, name="password-change-code"),

@@ -39,19 +39,13 @@ def patient_provider_ids(patient):
     if not patient.monitoring_active:
         if relationship.managing_doctor_id is None:
             return DoctorProfile.objects.none()
-        return DoctorProfile.objects.filter(
-            id=relationship.managing_doctor_id,
-            user__email_verified=True,
-        )
+        return DoctorProfile.objects.filter(id=relationship.managing_doctor_id)
     if relationship.visibility == "All Doctors":
-        return DoctorProfile.objects.filter(user__email_verified=True)
+        return DoctorProfile.objects.all()
     allowed_ids = [relationship.managing_doctor_id]
     if relationship.visibility == "Selected Doctors":
         allowed_ids.extend(relationship.selected_doctor_ids or [])
-    return DoctorProfile.objects.filter(
-        id__in=set(allowed_ids),
-        user__email_verified=True,
-    )
+    return DoctorProfile.objects.filter(id__in=set(allowed_ids))
 
 
 @api_view(["GET"])

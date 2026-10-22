@@ -37,15 +37,6 @@ export interface EvaluationResult {
   statusReason: string;
 }
 
-export function resolveGoalTargetValue(
-  target: string,
-  existingValue?: number | null,
-  templateValue?: number,
-): number | undefined {
-  const targetValueText = target.match(/\d+(?:\.\d+)?/)?.[0];
-  return targetValueText ? Number(targetValueText) : existingValue ?? templateValue;
-}
-
 export function evaluateGoal(
   goal: StructuredGoal,
   logs: HealthLog[],
@@ -61,19 +52,14 @@ export function evaluateGoal(
   ) || (
     evalType === 'reflection' && ['stress', 'social', 'habit'].includes(goal.metricKey || '')
   );
-  const weeklySleepGoal = goal.frequency === 'Weekly'
-    && evalType === 'duration'
-    && goal.metricKey === 'sleep';
-  if (!supportedCombination || weeklySleepGoal || !goal.startDate || !goal.reviewDate) {
+  if (!supportedCombination || !goal.startDate || !goal.reviewDate) {
     return {
       evaluable: false,
       achievedCount: 0,
       expectedCount: 0,
       percentage: 0,
       progressText: 'Progress not automatically evaluated',
-      statusReason: weeklySleepGoal
-        ? 'Weekly sleep goals do not have an agreed automatic evaluation rule'
-        : 'Custom or unsupported goal type without automatic evaluation',
+      statusReason: 'Custom or unsupported goal type without automatic evaluation',
     };
   }
 
